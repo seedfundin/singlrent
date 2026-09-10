@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'RentDirect — Direct rental prototype',
+  title: 'SingleRent — Direct rental prototype',
   description: 'An interactive UX/UI prototype for a Nigerian direct rental platform.',
 };
 
