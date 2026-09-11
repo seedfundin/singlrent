@@ -23,7 +23,7 @@ const admins = [
 export function AdminManagement({ go }: { go: (view: View) => void }) {
   const [mode, setMode] = useState<'list' | 'add' | 'profile'>('list');
   return <Shell go={go} role="admin" title="Admin management"><div className="page admin-management">
-    <div className="page-title"><span><small>Super Admin controls</small><h1>Admin management</h1><p>Create admins, assign roles and review access across the SingleRent platform.</p></span><span className="super-badge"><ShieldCheck size={14} /> Super Admin only</span></div>
+    <div className="page-title"><span><small>Super Admin controls</small><h1>Admin management</h1><p>Create admins, assign roles and review access across the Single Rent platform.</p></span><span className="super-badge"><ShieldCheck size={14} /> Super Admin only</span></div>
     {mode === 'list' && <>
       <div className="admin-summary"><Metric label="Active admins" value="06" note="Across 4 roles" /><Metric label="Super Admins" value="01" note="Amina Okoro" tone="gold" /><Metric label="Needs review" value="02" note="Permissions changed this week" tone="green" /></div>
       <section className="panel admins-table"><div className="subhead"><span><small>Platform administrators</small><h2>People with access</h2></span><Button onClick={() => setMode('add')}><Plus size={14} /> Add admin</Button></div><div className="admin-thead"><span>Admin</span><span>Role</span><span>Status</span><span>Last active</span><span>Permission summary</span></div>
