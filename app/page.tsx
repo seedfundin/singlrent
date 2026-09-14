@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   ArrowRight,
@@ -56,6 +57,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { calculateRentalCheckout, formatNaira } from '@/lib/pricing';
+import { viewPaths, type View } from '@/lib/routes';
 import { AdminManagement, Permissions } from '@/app/admin-management';
 import {
   AgentWorkspace,
@@ -68,35 +70,7 @@ import {
 } from '@/app/product-expansion';
 import { AccountType, KycFlow, SignIn, SignUp } from '@/app/auth';
 
-export type View =
-  | 'home'
-  | 'explore'
-  | 'listing'
-  | 'assistant'
-  | 'sign-in'
-  | 'sign-up'
-  | 'account-type'
-  | 'kyc'
-  | 'apply'
-  | 'payment'
-  | 'confirmation'
-  | 'tenant'
-  | 'maintenance'
-  | 'landlord'
-  | 'wizard'
-  | 'questions'
-  | 'admin'
-  | 'escrow'
-  | 'states'
-  | 'admins'
-  | 'permissions'
-  | 'agent'
-  | 'pricing'
-  | 'reviews'
-  | 'incidents'
-  | 'deposit'
-  | 'notifications'
-  | 'adminops';
+export type { View } from '@/lib/routes';
 export type AccountRole = 'tenant' | 'agent' | 'landlord';
 const directRentalCheckout = calculateRentalCheckout({
   annualRent: 4800000,
@@ -112,9 +86,13 @@ const photos = {
     'https://images.trvl-media.com/lodging/112000000/111750000/111748200/111748150/93d43aff.jpg?impolicy=resizecrop&ra=fill&rh=575&rw=575',
 };
 
-function Brand() {
+function Brand({ go }: { go: (v: View) => void }) {
   return (
-    <button className="brand">
+    <button
+      className="brand"
+      onClick={() => go('home')}
+      aria-label="SingleRent home"
+    >
       <i>
         <House size={17} />
       </i>
@@ -231,7 +209,7 @@ function Metric({
 function Header({ go }: { go: (v: View) => void }) {
   return (
     <header className="head">
-      <Brand />
+      <Brand go={go} />
       <nav>
         <button onClick={() => go('explore')}>Explore homes</button>
         <button onClick={() => go('home')}>How it works</button>
@@ -288,7 +266,7 @@ export function Shell({
   return (
     <div className="shell">
       <aside>
-        <Brand />
+        <Brand go={go} />
         <em>{role} workspace</em>
         <nav>
           {items.map(([n, v, Icon]) => (
@@ -339,7 +317,7 @@ export function Shell({
           </div>
         </div>
         <div className="mobile-title">
-          <Brand />
+          <Brand go={go} />
           <span>{role} workspace</span>
           <Bell size={17} />
         </div>
@@ -521,9 +499,9 @@ function Landing({ go }: { go: (v: View) => void }) {
           </article>
         </section>
         <footer>
-          <Brand />
+          <Brand go={go} />
           <span>Renting in Nigeria, made more direct.</span>
-          <span>© 2026 SingleRent prototype</span>
+          <span>© 2026 SingleRent</span>
         </footer>
       </div>
     </>
@@ -1318,7 +1296,8 @@ function Confirmation({ go }: { go: (v: View) => void }) {
             </p>
             <span>
               <b>
-                Payment received<small>{formatNaira(directRentalCheckout.total)}</small>
+                Payment received
+                <small>{formatNaira(directRentalCheckout.total)}</small>
               </b>
               <b>
                 In escrow<small>Awaiting approval</small>
@@ -1760,7 +1739,10 @@ function Landlord({ go }: { go: (v: View) => void }) {
             <span>
               <small>Ready to receive</small>
               <h3>₦4,800,000 is available for payout</h3>
-              <p>Full listed rent. The platform fee is paid separately by the tenant.</p>
+              <p>
+                Full listed rent. The platform fee is paid separately by the
+                tenant.
+              </p>
             </span>
           </span>
           <Button onClick={() => go('escrow')}>
@@ -2419,7 +2401,8 @@ function Escrow({ go }: { go: (v: View) => void }) {
               <CircleCheck size={15} />
               <span>
                 <b>Landlord approved rental</b>All checks complete. Releasing
-                sends ₦8,500,000 to Nnenna Holdings Ltd. and ₦425,000 to the named agent.
+                sends ₦8,500,000 to Nnenna Holdings Ltd. and ₦425,000 to the
+                named agent.
               </span>
             </p>
             {released ? (
@@ -2573,13 +2556,20 @@ function States({ go }: { go: (v: View) => void }) {
     </Shell>
   );
 }
-export default function App() {
-  const [view, setView] = useState<View>('home');
+export function SingleRentApp({ initialView }: { initialView: View }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [accountRole, setAccountRole] = useState<AccountRole>('tenant');
   const [gate, setGate] = useState(false);
+  const requestedRole = searchParams.get('role');
+  const kycRole: AccountRole =
+    requestedRole === 'tenant' ||
+    requestedRole === 'agent' ||
+    requestedRole === 'landlord'
+      ? requestedRole
+      : accountRole;
   const go = (v: View) => {
-    setView(v);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    router.push(viewPaths[v]);
   };
   const body: Record<View, ReactNode> = {
     home: <Landing go={go} />,
@@ -2593,11 +2583,11 @@ export default function App() {
         go={go}
         onChoose={(role) => {
           setAccountRole(role);
-          go('kyc');
+          router.push(`${viewPaths.kyc}?role=${role}`);
         }}
       />
     ),
-    kyc: <KycFlow go={go} role={accountRole} />,
+    kyc: <KycFlow go={go} role={kycRole} />,
     apply: <Apply go={go} />,
     payment: <Payment go={go} />,
     confirmation: <Confirmation go={go} />,
@@ -2623,14 +2613,14 @@ export default function App() {
     <div className="min-h-screen bg-white">
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
-          key={view}
+          key={initialView}
           className="min-h-screen"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -8 }}
           transition={{ duration: 0.24, ease: 'easeOut' }}
         >
-          {body[view]}
+          {body[initialView]}
         </motion.div>
       </AnimatePresence>
       <Dialog open={gate} onOpenChange={setGate}>
@@ -2667,4 +2657,8 @@ export default function App() {
       </Dialog>
     </div>
   );
+}
+
+export default function HomePage() {
+  return <SingleRentApp initialView="home" />;
 }

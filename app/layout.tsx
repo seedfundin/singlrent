@@ -13,8 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'SingleRent — Direct rental prototype',
-  description: 'An interactive UX/UI prototype for a Nigerian direct rental platform.',
+  title: 'SingleRent — Nigerian rental platform',
+  description:
+    'Find verified Nigerian rental homes and make secure rental payments.',
 };
 
 export default function RootLayout({
