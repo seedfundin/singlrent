@@ -32,7 +32,8 @@ import {
   Wrench,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Shell, type View } from '@/app/page';
+import { Shell } from '@/features/app/single-rent-app';
+import type { View } from '@/lib/routes';
 import { PaymentBreakdown } from '@/components/payment-breakdown';
 import {
   calculateRentalCheckout,

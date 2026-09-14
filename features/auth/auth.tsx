@@ -15,7 +15,8 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import type { AccountRole, View } from '@/app/page';
+import type { AccountRole } from '@/lib/account';
+import type { View } from '@/lib/routes';
 import './auth.css';
 
 const roleCopy: Record<

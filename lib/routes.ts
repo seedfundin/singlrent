@@ -30,13 +30,3 @@ export const viewPaths = {
 } as const;
 
 export type View = keyof typeof viewPaths;
-
-export const staticRouteParams = Object.values(viewPaths)
-  .filter((path) => path !== '/')
-  .map((path) => ({ slug: path.slice(1).split('/') }));
-
-export function viewForPath(pathname: string): View | undefined {
-  return (Object.entries(viewPaths) as [View, string][]).find(
-    ([, path]) => path === pathname,
-  )?.[0];
-}
