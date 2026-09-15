@@ -94,16 +94,21 @@ function MiniMetric({
 
 export function AgentWorkspace({ go }: { go: (v: View) => void }) {
   return (
-    <Shell go={go} role="landlord" title="Agent dashboard">
+    <Shell go={go} role="agent" title="Agent dashboard">
       <div className="page agent-page">
         <Head
           eyebrow="Agent workspace"
           title="Good morning, Tolu"
           copy="Manage listings, enquiries and commissions for your landlord clients."
           action={
-            <Button>
-              <Plus size={14} /> Add property
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => go('agent-homes')}>
+                <Building2 size={14} /> Managed homes
+              </Button>
+              <Button onClick={() => go('wizard')}>
+                <Plus size={14} /> Add property
+              </Button>
+            </div>
           }
         />
         <div className="agent-note">
@@ -145,7 +150,7 @@ export function AgentWorkspace({ go }: { go: (v: View) => void }) {
                 <small>My listings</small>
                 <h2>Performance and availability</h2>
               </span>
-              <Button variant="ghost">
+              <Button variant="ghost" onClick={() => go('agent-homes')}>
                 All listings <ArrowRight size={13} />
               </Button>
             </div>
@@ -169,7 +174,7 @@ export function AgentWorkspace({ go }: { go: (v: View) => void }) {
                 '₦1.85m / year',
               ],
             ].map(([name, type, activity, rent]) => (
-              <button key={name}>
+              <button key={name} onClick={() => go('agent-home')}>
                 <span className="listing-mark">
                   <Building2 size={15} />
                 </span>

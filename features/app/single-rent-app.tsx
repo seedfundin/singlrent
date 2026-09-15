@@ -70,6 +70,12 @@ import {
   ReviewsRatings,
 } from "@/features/product/expansion";
 import { AccountType, KycFlow, SignIn, SignUp } from "@/features/auth/auth";
+import {
+  ManagedHomeDetails,
+  ManagedHomes,
+  PropertyMaintenance,
+  SavedHomes,
+} from "@/features/homes/portfolio";
 
 export type { View } from "@/lib/routes";
 export type { AccountRole } from "@/lib/account";
@@ -189,21 +195,39 @@ function Metric({
   note,
   icon,
   tone = "",
+  onClick,
 }: {
   label: string;
   value: string;
   note: string;
   icon?: ReactNode;
   tone?: string;
+  onClick?: () => void;
 }) {
-  return (
-    <div className={`metric ${tone}`}>
+  const content = (
+    <>
       <span>
         {label}
         {icon}
       </span>
       <strong>{value}</strong>
       <small>{note}</small>
+    </>
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className={`metric metric-button w-full text-left ${tone}`}
+        onClick={onClick}
+      >
+        {content}
+      </button>
+    );
+  }
+  return (
+    <div className={`metric ${tone}`}>
+      {content}
     </div>
   );
 }
@@ -232,7 +256,7 @@ export function Shell({
   children,
 }: {
   go: (v: View) => void;
-  role?: "tenant" | "landlord" | "admin";
+  role?: "tenant" | "landlord" | "agent" | "admin";
   title: string;
   children: ReactNode;
 }) {
@@ -240,7 +264,7 @@ export function Shell({
     role === "tenant"
       ? [
           ["Overview", "tenant", LayoutDashboard],
-          ["Saved homes", "explore", Heart],
+          ["Saved homes", "saved-homes", Heart],
           ["Applications", "apply", FileText],
           ["Payments", "payment", WalletCards],
           ["Messages", "assistant", MessageCircle],
@@ -249,12 +273,19 @@ export function Shell({
       : role === "landlord"
         ? [
             ["Overview", "landlord", LayoutDashboard],
-            ["Properties", "wizard", Building2],
+            ["My homes", "landlord-homes", Building2],
             ["Applications", "apply", FileText],
             ["Questions", "questions", MessageCircle],
-            ["Maintenance", "maintenance", Wrench],
             ["Payouts", "escrow", WalletCards],
           ]
+        : role === "agent"
+          ? [
+              ["Overview", "agent", LayoutDashboard],
+              ["Managed homes", "agent-homes", Building2],
+              ["Applications", "apply", FileText],
+              ["Enquiries", "assistant", MessageCircle],
+              ["Fees", "pricing", WalletCards],
+            ]
         : [
             ["Overview", "admin", LayoutDashboard],
             ["KYC reviews", "kyc", ShieldCheck],
@@ -287,11 +318,13 @@ export function Shell({
             Settings
           </button>
           <div className="profile">
-            <i>{role === "landlord" ? "JO" : role === "admin" ? "AO" : "AO"}</i>
+            <i>{role === "landlord" ? "JO" : role === "agent" ? "TO" : role === "admin" ? "AO" : "AO"}</i>
             <span>
               <b>
                 {role === "landlord"
                   ? "Jide Ojo"
+                  : role === "agent"
+                    ? "Tolu Adeyemi"
                   : role === "admin"
                     ? "Amina Okoro"
                     : "Adaeze Okafor"}
@@ -331,7 +364,9 @@ export function Shell({
                   ? "tenant"
                   : role === "landlord"
                     ? "landlord"
-                    : "admin",
+                    : role === "agent"
+                      ? "agent"
+                      : "admin",
               )
             }
           >
@@ -1348,6 +1383,7 @@ function Tenant({ go }: { go: (v: View) => void }) {
             value="08"
             note="2 new matches today"
             icon={<Heart size={16} />}
+            onClick={() => go("saved-homes")}
           />
           <Metric
             label="Active applications"
@@ -1540,8 +1576,8 @@ function Maintenance({ go }: { go: (v: View) => void }) {
         ) : (
           <>
             <Heading
-              title="Maintenance"
-              copy="Track repairs and stay in sync with your landlord."
+              title="Your maintenance requests"
+              copy="Report issues in your rented home and track your landlord’s repair updates."
               action={
                 <Button onClick={() => setForm(true)}>
                   <Plus size={14} />
@@ -1677,8 +1713,8 @@ function Landlord({ go }: { go: (v: View) => void }) {
                 <small>Your properties</small>
                 <h2>Portfolio at a glance</h2>
               </span>
-              <Button variant="ghost" onClick={() => go("wizard")}>
-                Manage <ArrowRight size={13} />
+              <Button variant="ghost" onClick={() => go("landlord-homes")}>
+                View all homes <ArrowRight size={13} />
               </Button>
             </div>
             <div className="thead">
@@ -1697,7 +1733,7 @@ function Landlord({ go }: { go: (v: View) => void }) {
               ["3 bedroom apartment, Ikoyi", "Rented", "Mariam Bello", "₦8.5m"],
               ["Studio on Admiralty", "Published", "—", "₦1.85m"],
             ].map(([a, b, c, d]) => (
-              <button onClick={() => go("wizard")} key={a}>
+              <button onClick={() => go("landlord-home")} key={a}>
                 <span>
                   <Img
                     src={a.includes("3 bedroom") ? photos.suite : photos.living}
@@ -2593,8 +2629,12 @@ export function SingleRentApp({ initialView }: { initialView: View }) {
     payment: <Payment go={go} />,
     confirmation: <Confirmation go={go} />,
     tenant: <Tenant go={go} />,
+    "saved-homes": <SavedHomes go={go} />,
     maintenance: <Maintenance go={go} />,
     landlord: <Landlord go={go} />,
+    "landlord-homes": <ManagedHomes go={go} manager="landlord" />,
+    "landlord-home": <ManagedHomeDetails go={go} manager="landlord" />,
+    "landlord-maintenance": <PropertyMaintenance go={go} manager="landlord" />,
     wizard: <Wizard go={go} />,
     questions: <Questions go={go} />,
     admin: <Admin go={go} />,
@@ -2603,6 +2643,9 @@ export function SingleRentApp({ initialView }: { initialView: View }) {
     admins: <AdminManagement go={go} />,
     permissions: <Permissions go={go} />,
     agent: <AgentWorkspace go={go} />,
+    "agent-homes": <ManagedHomes go={go} manager="agent" />,
+    "agent-home": <ManagedHomeDetails go={go} manager="agent" />,
+    "agent-maintenance": <PropertyMaintenance go={go} manager="agent" />,
     pricing: <FeeCheckout go={go} />,
     reviews: <ReviewsRatings go={go} />,
     incidents: <IncidentReports go={go} />,
