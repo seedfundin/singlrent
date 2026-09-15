@@ -8,6 +8,8 @@ import {
   Building2,
   Check,
   CircleCheck,
+  CircleX,
+  Clock3,
   House,
   KeyRound,
   ShieldCheck,
@@ -17,7 +19,7 @@ import {
 import { Button } from '@/components/ui/button';
 import type { AccountRole } from '@/lib/account';
 import type { View } from '@/lib/routes';
-import { api, ApiError, type ApiSession, registrationDraftStore, sessionStore } from '@/lib/api';
+import { api, ApiError, type ApiSession, type NinVerificationResult, registrationDraftStore, sessionStore } from '@/lib/api';
 import './auth.css';
 
 const roleCopy: Record<
@@ -410,12 +412,13 @@ export function KycFlow({
   const [challengeId, setChallengeId] = useState<string | null>(null);
   const [code, setCode] = useState('');
   const [developmentCode, setDevelopmentCode] = useState<string | null>(null);
+  const [verification, setVerification] = useState<NinVerificationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const labels = [
     'Account details',
     'Phone verification',
-    'NIMC confirmation',
+    'Dojah NIN check',
     'Complete',
   ];
   const heading =
@@ -433,7 +436,7 @@ export function KycFlow({
         ? `Enter the six-digit code sent to ${phone || 'your phone number'}.`
         : step === 3
           ? 'We will confirm that your NIN matches the NIMC record.'
-          : 'Review the details before submitting your NIN verification.';
+          : 'Dojah has returned your verification result.';
   const continueKyc = async () => {
     if (!currentSession) {
       setError('Please sign in again to continue verification.');
@@ -454,9 +457,9 @@ export function KycFlow({
         await api.users.confirmPhoneVerification(currentSession.accessToken, challengeId, code);
         setStep(3);
       } else if (step === 3) {
-        await api.users.submitNin(currentSession.accessToken, nin);
+        const result = await api.users.submitNin(currentSession.accessToken, nin);
+        setVerification(result);
         setStep(4);
-      } else {
         setComplete(true);
       }
     } catch (cause: unknown) {
@@ -499,28 +502,47 @@ export function KycFlow({
           {complete ? (
             <div className="kyc-success">
               <i>
-                <CircleCheck size={30} />
+                {verification?.verified ? <CircleCheck size={30} /> : verification?.status === 'REJECTED' ? <CircleX size={30} /> : <Clock3 size={30} />}
               </i>
               <span>
-                <BadgeCheck size={13} /> Verification submitted
+                {verification?.verified ? <BadgeCheck size={13} /> : <Clock3 size={13} />} Dojah NIN check
               </span>
-              <h2>Your NIN verification is under review.</h2>
+              <h2>
+                {verification?.verified
+                  ? 'Your identity has been verified.'
+                  : verification?.status === 'REJECTED'
+                    ? 'We could not verify this NIN.'
+                    : 'Your NIN verification is pending.'}
+              </h2>
               <p>
-                Your phone is verified. We have submitted your NIN to the configured
-                verification provider and will notify you when NIMC confirmation is complete.
+                {verification?.verified
+                  ? 'Dojah confirmed your NIN and the phone number on the NIMC record matches your verified phone number.'
+                  : verification?.status === 'REJECTED'
+                    ? 'Check that your NIN and phone number match your NIMC record, then try again.'
+                    : 'Your request is still being processed. Check your profile for the latest KYC status.'}
               </p>
               <div>
                 <b>
                   <Check size={14} /> Phone verified
                 </b>
                 <b>
-                  <Clock3 size={14} /> NIMC verification pending
+                  {verification?.verified ? <Check size={14} /> : <Clock3 size={14} />}{' '}
+                  {verification?.verified
+                    ? 'Dojah NIN verified'
+                    : verification?.status === 'REJECTED'
+                      ? 'Dojah NIN not verified'
+                      : 'Dojah NIN pending'}
                 </b>
               </div>
-              <Button onClick={() => go('home')}>
-                Return to SingleRent{' '}
-                <ArrowRight size={14} />
-              </Button>
+              {verification?.status === 'REJECTED' ? (
+                <Button onClick={() => { setComplete(false); setVerification(null); setStep(3); }}>
+                  Try another NIN <ArrowRight size={14} />
+                </Button>
+              ) : (
+                <Button onClick={() => go('home')}>
+                  Return to SingleRent <ArrowRight size={14} />
+                </Button>
+              )}
             </div>
           ) : (
             <>
@@ -578,12 +600,12 @@ export function KycFlow({
                     <span>
                       <StatusLine label="NIN provided" state="Ready" />
                       <StatusLine
-                        label="NIMC confirmation"
-                        state="Ready to confirm"
+                        label="Dojah NIN check"
+                        state="Ready to verify"
                       />
                     </span>
                     <p>
-                      Your encrypted NIN is sent for verification. This action never
+                      Your encrypted NIN is sent to Dojah for NIMC verification. This action never
                       exposes the full NIN back to the browser.
                     </p>
                   </div>
@@ -602,7 +624,7 @@ export function KycFlow({
                     <span>
                       NIN{' '}
                       <b>
-                        •••• •••• {nin.slice(-4)} <em>Submitted for NIMC review</em>
+                        •••• •••• {nin.slice(-4)} <em>Dojah verification complete</em>
                       </b>
                     </span>
                   </div>
@@ -619,9 +641,9 @@ export function KycFlow({
                 {error && <p className="auth-error" role="alert">{error}</p>}
                 <Button disabled={submitting} onClick={continueKyc}>
                   {step === 3
-                    ? 'Confirm with NIMC'
+                    ? 'Verify with Dojah'
                     : step === 4
-                      ? 'Submit verification'
+                      ? 'Verification complete'
                       : submitting
                         ? 'Please wait…'
                         : 'Continue'}{' '}

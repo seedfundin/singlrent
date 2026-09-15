@@ -1,17 +1,23 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { KycStatus } from '@prisma/client';
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'crypto';
+import { AuditService } from '../common/database/audit.service';
 import { PrismaService } from '../common/database/prisma.service';
-import { ConfirmPhoneVerificationRequest, SendPhoneVerificationRequest, SubmitNinRequest } from './dto/user.schemas';
-import { NimcVerificationService } from './nimc-verification.service';
+import {
+  ConfirmPhoneVerificationRequest,
+  SendPhoneVerificationRequest,
+  SubmitNinRequest,
+} from './dto/user.schemas';
+import { DojahVerificationService, type DojahNinLookup } from './dojah-verification.service';
 
 @Injectable()
 export class KycService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
-    private readonly nimcVerificationService: NimcVerificationService,
+    private readonly dojahVerificationService: DojahVerificationService,
+    private readonly audit: AuditService,
   ) {}
 
   async sendPhoneChallenge(userId: string, input: SendPhoneVerificationRequest) {
@@ -79,10 +85,13 @@ export class KycService {
     if (!user.phone || !user.phoneVerifiedAt || user.kyc?.phoneStatus !== KycStatus.VERIFIED) {
       throw new BadRequestException('Verify your phone number before submitting your NIN');
     }
+    if (user.kyc?.status === KycStatus.VERIFIED) {
+      throw new BadRequestException('Your identity has already been verified by Dojah');
+    }
 
-    const provider = await this.nimcVerificationService.submit(input.nin, user.phone);
     const now = new Date();
-    return this.prisma.kycProfile.upsert({
+    const providerReference = `dojah_${randomUUID()}`;
+    await this.prisma.kycProfile.upsert({
       where: { userId },
       create: {
         userId,
@@ -91,19 +100,75 @@ export class KycService {
         ninStatus: KycStatus.PENDING,
         phoneStatus: KycStatus.VERIFIED,
         status: KycStatus.PENDING,
-        providerReference: provider.providerReference,
+        providerReference,
         submittedAt: now,
       },
       update: {
         ninCiphertext: this.encrypt(input.nin),
         ninLast4: input.nin.slice(-4),
         ninStatus: KycStatus.PENDING,
+        phoneStatus: KycStatus.VERIFIED,
         status: KycStatus.PENDING,
-        providerReference: provider.providerReference,
+        providerReference,
         submittedAt: now,
+        verifiedAt: null,
         rejectionReason: null,
       },
     });
+    await this.audit.record({ actorUserId: userId, action: 'kyc.dojah_started', entityType: 'kyc_profile', entityId: userId });
+
+    let verification: DojahNinLookup;
+    try {
+      verification = await this.dojahVerificationService.verifyNin(input.nin);
+    } catch (error) {
+      await this.audit.record({
+        actorUserId: userId,
+        action: 'kyc.dojah_confirmation_failed',
+        entityType: 'kyc_profile',
+        entityId: userId,
+      });
+      throw error;
+    }
+
+    const phoneMatchesNimcRecord = verification.verified && this.phoneNumbersMatch(user.phone, verification.phoneNumber);
+    const verified = verification.verified && phoneMatchesNimcRecord;
+    const status = verified ? KycStatus.VERIFIED : KycStatus.REJECTED;
+    const rejectionReason = !verification.verified
+      ? verification.reason
+      : 'The phone number returned by Dojah did not match the verified phone number.';
+    const result = await this.prisma.kycProfile.updateMany({
+      where: {
+        userId,
+        providerReference,
+        phoneStatus: KycStatus.VERIFIED,
+        status: { in: [KycStatus.PENDING, KycStatus.UNDER_REVIEW] },
+      },
+      data: verified
+        ? {
+            status: KycStatus.VERIFIED,
+            ninStatus: KycStatus.VERIFIED,
+            verifiedAt: new Date(),
+            rejectionReason: null,
+          }
+        : {
+            status: KycStatus.REJECTED,
+            ninStatus: KycStatus.REJECTED,
+            verifiedAt: null,
+            phoneStatus: verification.verified ? KycStatus.REJECTED : KycStatus.VERIFIED,
+            rejectionReason,
+          },
+    });
+    if (result.count === 0) {
+      return { status: KycStatus.PENDING, verified: false, provider: 'DOJAH', superseded: true };
+    }
+
+    await this.audit.record({
+      actorUserId: userId,
+      action: verified ? 'kyc.verified_via_dojah' : 'kyc.dojah_verification_rejected',
+      entityType: 'kyc_profile',
+      entityId: userId,
+    });
+    return { status, verified, provider: 'DOJAH', providerReference };
   }
 
   async assertVerified(userId: string): Promise<void> {
@@ -136,5 +201,17 @@ export class KycService {
     const decipher = createDecipheriv('aes-256-gcm', key, buffer.subarray(0, 12));
     decipher.setAuthTag(buffer.subarray(12, 28));
     return Buffer.concat([decipher.update(buffer.subarray(28)), decipher.final()]).toString('utf8');
+  }
+
+  private phoneNumbersMatch(accountPhone: string, nimcPhone: string): boolean {
+    const normalize = (phone: string): string | undefined => {
+      const digits = phone.replace(/\D/g, '');
+      if (/^0\d{10}$/.test(digits)) return digits;
+      if (/^234\d{10}$/.test(digits)) return `0${digits.slice(3)}`;
+      return undefined;
+    };
+    const account = normalize(accountPhone);
+    const nimc = normalize(nimcPhone);
+    return Boolean(account && nimc && account === nimc);
   }
 }

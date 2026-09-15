@@ -12,6 +12,14 @@ export type ApiSession = {
   };
 };
 
+export type NinVerificationResult = {
+  status: 'PENDING' | 'VERIFIED' | 'REJECTED';
+  verified: boolean;
+  provider: 'DOJAH';
+  providerReference?: string;
+  superseded?: boolean;
+};
+
 type ApiErrorResponse = { message?: string | string[] };
 
 export class ApiError extends Error {
@@ -121,7 +129,7 @@ export const api = {
       return request('/users/me/phone-verification/confirm', { method: 'POST', body: JSON.stringify({ challengeId, code }) }, token);
     },
     submitNin(token: string, nin: string) {
-      return request('/users/me/kyc/nin', { method: 'POST', body: JSON.stringify({ nin }) }, token);
+      return request<NinVerificationResult>('/users/me/kyc/nin', { method: 'POST', body: JSON.stringify({ nin }) }, token);
     },
   },
 };

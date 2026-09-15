@@ -158,6 +158,9 @@ export class AdminService {
   }
 
   async reviewKyc(actorId: string, userId: string, input: ReviewKycRequest) {
+    if (input.approved) {
+      throw new ForbiddenException('KYC can only be verified by a successful Dojah NIN confirmation');
+    }
     if (!input.approved && !input.rejectionReason) {
       throw new ConflictException('Provide a rejection reason when declining KYC');
     }
@@ -165,23 +168,23 @@ export class AdminService {
     if (!kyc) {
       throw new NotFoundException('KYC profile not found');
     }
-    const status = input.approved ? KycStatus.VERIFIED : KycStatus.REJECTED;
+    const status = KycStatus.REJECTED;
     const updated = await this.prisma.kycProfile.update({
       where: { userId },
       data: {
         status,
         ninStatus: status,
-        verifiedAt: input.approved ? new Date() : null,
+        verifiedAt: null,
         reviewedAt: new Date(),
         reviewedByUserId: actorId,
-        rejectionReason: input.approved ? null : input.rejectionReason,
+        rejectionReason: input.rejectionReason,
       },
     });
     await this.notificationsService.create({
       userId,
       type: 'KYC_UPDATED',
-      title: input.approved ? 'KYC verified' : 'KYC needs attention',
-      body: input.approved ? 'Your identity verification is complete.' : 'Your KYC submission requires an update.',
+      title: 'KYC needs attention',
+      body: 'Your KYC submission requires an update.',
       data: { status },
     });
     return updated;

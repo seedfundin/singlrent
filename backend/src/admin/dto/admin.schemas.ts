@@ -33,6 +33,8 @@ export const acceptAdminInvitationSchema = z
     }
   });
 export const reviewKycSchema = z.object({
+  // `approved: true` remains parseable for old clients, but is rejected by the
+  // service because only Dojah's NIN verification may verify a KYC profile.
   approved: z.boolean(),
   rejectionReason: z.string().trim().min(3).max(1000).optional(),
 });

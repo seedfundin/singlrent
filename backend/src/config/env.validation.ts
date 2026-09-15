@@ -22,8 +22,10 @@ const environmentSchema = z.object({
   CLOUDINARY_CLOUD_NAME: z.string().min(1).optional(),
   CLOUDINARY_API_KEY: z.string().min(1).optional(),
   CLOUDINARY_API_SECRET: z.string().min(1).optional(),
-  NIMC_VERIFICATION_URL: z.string().url().optional(),
-  NIMC_VERIFICATION_API_KEY: z.string().min(1).optional(),
+  // Dojah verifies NINs against NIMC. Its secret key is backend-only.
+  DOJAH_BASE_URL: z.string().url().default('https://api.dojah.io'),
+  DOJAH_APP_ID: z.string().min(1).optional(),
+  DOJAH_SECRET_KEY: z.string().min(1).optional(),
   GOOGLE_OAUTH_CLIENT_ID: z.string().min(1).optional(),
   GOOGLE_TOKEN_INFO_URL: z.string().url().default('https://oauth2.googleapis.com/tokeninfo'),
 });

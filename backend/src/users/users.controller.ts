@@ -61,4 +61,5 @@ export class UsersController {
   ) {
     return this.kycService.submitNin(user.userId, input);
   }
+
 }

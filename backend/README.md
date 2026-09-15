@@ -31,6 +31,16 @@ The API starts at `http://localhost:4000`, Swagger is at `http://localhost:4000/
 
 Use `Authorization: Bearer <accessToken>` for protected endpoints. Socket.IO clients connect to `/realtime` using the same access token in `auth.token` or the `Authorization` header.
 
+## Dojah NIN KYC
+
+SingleRent verifies a user's identity through Dojah's NIN lookup against NIMC. Entering an 11-digit NIN first creates a `PENDING` submission; it changes to `VERIFIED` only after Dojah returns a valid NIMC identity record and its phone number matches the user's verified Nigerian phone number.
+
+1. Create and complete compliance for a Dojah app, then add `DOJAH_APP_ID` and `DOJAH_SECRET_KEY` to the backend environment. Use `DOJAH_BASE_URL=https://sandbox.dojah.io` for Dojah sandbox testing.
+2. The authenticated client sends `POST /api/v1/users/me/kyc/nin` with the NIN. The backend calls Dojah directly; the secret key never reaches the browser.
+3. A successful, matching result returns `VERIFIED`. An invalid NIN or a NIMC phone mismatch returns `REJECTED`. Provider outages, unavailable credentials, or wallet/rate-limit errors leave the user unverified and return an error.
+
+Admins can reject a KYC submission, but cannot approve or verify it. `VERIFIED` is reachable solely through a successful Dojah NIN result.
+
 ## Current scope
 
 - PostgreSQL with Prisma migrations and seeded platform roles/permissions.
