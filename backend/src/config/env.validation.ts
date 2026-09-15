@@ -1,0 +1,44 @@
+import { z } from 'zod';
+
+const booleanFromEnvironment = z
+  .enum(['true', 'false'])
+  .transform((value) => value === 'true');
+
+const environmentSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(4000),
+  CORS_ORIGIN: z.string().min(1).default('http://localhost:3000'),
+  SWAGGER_ENABLED: z.preprocess((value) => value ?? 'true', booleanFromEnvironment),
+  DATABASE_URL: z.string().url(),
+  REDIS_URL: z.string().url(),
+  JWT_ACCESS_SECRET: z.string().min(32),
+  JWT_ACCESS_TTL: z.string().min(2).default('15m'),
+  JWT_REFRESH_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
+  PASSWORD_HASH_ROUNDS: z.coerce.number().int().min(10).max(14).default(12),
+  FIELD_ENCRYPTION_SECRET: z.string().min(32).default('local-development-field-encryption-secret-change-me'),
+  PAYSTACK_SECRET_KEY: z.string().min(1).optional(),
+  PAYSTACK_BASE_URL: z.string().url().default('https://api.paystack.co'),
+  PAYSTACK_CALLBACK_URL: z.string().url().optional(),
+  CLOUDINARY_CLOUD_NAME: z.string().min(1).optional(),
+  CLOUDINARY_API_KEY: z.string().min(1).optional(),
+  CLOUDINARY_API_SECRET: z.string().min(1).optional(),
+  NIMC_VERIFICATION_URL: z.string().url().optional(),
+  NIMC_VERIFICATION_API_KEY: z.string().min(1).optional(),
+  GOOGLE_OAUTH_CLIENT_ID: z.string().min(1).optional(),
+  GOOGLE_TOKEN_INFO_URL: z.string().url().default('https://oauth2.googleapis.com/tokeninfo'),
+});
+
+export type EnvironmentVariables = z.infer<typeof environmentSchema>;
+
+export function validateEnvironment(config: Record<string, unknown>): EnvironmentVariables {
+  const parsed = environmentSchema.safeParse(config);
+
+  if (!parsed.success) {
+    const messages = parsed.error.issues
+      .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+      .join(', ');
+    throw new Error(`Invalid environment configuration: ${messages}`);
+  }
+
+  return parsed.data;
+}

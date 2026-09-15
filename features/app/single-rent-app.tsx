@@ -59,6 +59,7 @@ import {
 import { calculateRentalCheckout, formatNaira } from "@/lib/pricing";
 import { viewPaths, type View } from "@/lib/routes";
 import type { AccountRole } from "@/lib/account";
+import { api, registrationDraftStore, sessionStore, type ApiSession } from "@/lib/api";
 import { AdminManagement, Permissions } from "@/features/admin/management";
 import {
   AgentWorkspace,
@@ -2608,20 +2609,39 @@ export function SingleRentApp({ initialView }: { initialView: View }) {
   const go = (v: View) => {
     router.push(viewPaths[v]);
   };
+  const destinationFor = (session: ApiSession): View => {
+    if (session.user.roles.includes('SUPER_ADMIN') || session.user.roles.includes('ADMIN')) return 'admin';
+    if (session.user.roles.includes('LANDLORD')) return 'landlord';
+    if (session.user.roles.includes('AGENT')) return 'agent';
+    return 'tenant';
+  };
+  const handleAuthenticated = (session: ApiSession) => {
+    router.push(viewPaths[destinationFor(session)]);
+  };
+  const registerWithRole = async (role: AccountRole): Promise<void> => {
+    const draft = registrationDraftStore.get();
+    if (!draft) {
+      router.push(viewPaths['sign-up']);
+      throw new Error('Your registration details expired. Please complete the sign-up form again.');
+    }
+    const roleCode = role.toUpperCase() as 'TENANT' | 'LANDLORD' | 'AGENT';
+    const session = await api.auth.register({ ...draft, role: roleCode });
+    registrationDraftStore.clear();
+    sessionStore.set(session);
+    setAccountRole(role);
+    router.push(`${viewPaths.kyc}?role=${role}`);
+  };
   const body: Record<View, ReactNode> = {
     home: <Landing go={go} />,
     explore: <Explore go={go} />,
     listing: <Listing go={go} gate={() => setGate(true)} />,
     assistant: <Assistant go={go} />,
-    "sign-in": <SignIn go={go} />,
+    "sign-in": <SignIn go={go} onAuthenticated={handleAuthenticated} />,
     "sign-up": <SignUp go={go} />,
     "account-type": (
       <AccountType
         go={go}
-        onChoose={(role) => {
-          setAccountRole(role);
-          router.push(`${viewPaths.kyc}?role=${role}`);
-        }}
+        onChoose={registerWithRole}
       />
     ),
     kyc: <KycFlow go={go} role={kycRole} />,

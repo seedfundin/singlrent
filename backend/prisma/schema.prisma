@@ -1,0 +1,1001 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleCode {
+  TENANT
+  LANDLORD
+  AGENT
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum PermissionKey {
+  USERS_VIEW
+  USERS_EDIT
+  USERS_SUSPEND
+  KYC_VIEW
+  KYC_REVIEW
+  LISTINGS_VIEW
+  LISTINGS_APPROVE
+  LISTINGS_REJECT
+  LISTINGS_SUSPEND
+  TRANSACTIONS_VIEW
+  ESCROW_MANAGE
+  PAYOUTS_RELEASE
+  REFUNDS_PROCESS
+  PLATFORM_FEES_VIEW
+  AGENT_COMMISSIONS_VIEW
+  REPORTS_VIEW
+  REPORTS_INVESTIGATE
+  REPORTS_RESOLVE
+  MAINTENANCE_MANAGE
+  REVIEWS_VIEW
+  REVIEWS_MODERATE
+  ADMINS_CREATE
+  ADMIN_PERMISSIONS_EDIT
+  AUDIT_LOGS_VIEW
+  SYSTEM_SETTINGS_MODIFY
+}
+
+enum PermissionEffect {
+  ALLOW
+  DENY
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum KycStatus {
+  NOT_STARTED
+  PENDING
+  UNDER_REVIEW
+  VERIFIED
+  REJECTED
+}
+
+enum ListingStatus {
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  REJECTED
+  SUSPENDED
+  ARCHIVED
+}
+
+enum ListingAvailability {
+  AVAILABLE
+  RENTED
+  UNAVAILABLE
+}
+
+enum ListingSource {
+  LANDLORD
+  AGENT
+}
+
+enum PropertyType {
+  APARTMENT
+  HOUSE
+  DUPLEX
+  STUDIO
+  ROOM
+  OTHER
+}
+
+enum ApplicationStatus {
+  PENDING
+  AWAITING_PAYMENT
+  PAYMENT_HELD
+  APPROVED
+  REJECTED
+  CANCELLED
+  ACTIVE
+  COMPLETED
+}
+
+enum TenancyStatus {
+  PENDING_MOVE_IN
+  ACTIVE
+  ENDED
+  CANCELLED
+}
+
+enum PaymentProvider {
+  PAYSTACK
+}
+
+enum PaymentStatus {
+  INITIALIZED
+  PENDING
+  SUCCESS
+  FAILED
+  ABANDONED
+  REVERSED
+  REFUNDED
+}
+
+enum EscrowStatus {
+  HELD
+  READY_FOR_RELEASE
+  RELEASE_SCHEDULED
+  RELEASED
+  DISPUTED
+  REFUNDED
+  PARTIALLY_SETTLED
+}
+
+enum CautionStatus {
+  NOT_APPLICABLE
+  HELD
+  DEDUCTION_PROPOSED
+  DISPUTED
+  SETTLED
+  REFUNDED
+}
+
+enum PayoutKind {
+  LANDLORD
+  AGENT
+  CAUTION_REFUND
+  REFUND
+}
+
+enum PayoutStatus {
+  PENDING
+  SCHEDULED
+  PROCESSING
+  PAID
+  FAILED
+  CANCELLED
+}
+
+enum LedgerAccountCode {
+  PAYMENT_CLEARING
+  RENT_ESCROW
+  CAUTION_ESCROW
+  PLATFORM_REVENUE
+  AGENT_PAYABLE
+  LANDLORD_PAYABLE
+  TENANT_REFUND_PAYABLE
+}
+
+enum LedgerEntryType {
+  PAYMENT_CONFIRMED
+  RENT_ESCROW_HELD
+  CAUTION_ESCROW_HELD
+  PLATFORM_FEE_ALLOCATED
+  AGENT_COMMISSION_ALLOCATED
+  LANDLORD_PAYOUT_ALLOCATED
+  CAUTION_REFUND_ALLOCATED
+  CAUTION_DEDUCTION_ALLOCATED
+  PAYOUT_COMPLETED
+  PAYMENT_REVERSED
+  REFUND_ISSUED
+}
+
+enum MaintenanceCategory {
+  PLUMBING
+  ELECTRICITY
+  APPLIANCE
+  SECURITY
+  STRUCTURAL
+  OTHER
+}
+
+enum MaintenancePriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum MaintenanceStatus {
+  OPEN
+  ACKNOWLEDGED
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum ConversationType {
+  LISTING_ENQUIRY
+  TENANCY
+  SUPPORT
+}
+
+enum MessageKind {
+  USER
+  SYSTEM
+  AI
+}
+
+enum NotificationType {
+  NEW_MESSAGE
+  NEW_APPLICATION
+  APPLICATION_APPROVED
+  APPLICATION_REJECTED
+  PAYMENT_SUCCESSFUL
+  PAYMENT_FAILED
+  ESCROW_UPDATED
+  COMMISSION_EARNED
+  MAINTENANCE_CREATED
+  MAINTENANCE_UPDATED
+  LISTING_STATUS_UPDATED
+  KYC_UPDATED
+  INCIDENT_UPDATED
+  CAUTION_DISPUTE_UPDATED
+  ADMIN_INVITATION
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  SMS
+  PUSH
+}
+
+enum IncidentType {
+  SAFETY_THREAT
+  HARASSMENT
+  FRAUD
+  VIOLENCE
+  SERIOUS_PROPERTY_SAFETY
+  MISCONDUCT
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  INVESTIGATING
+  RESOLVED
+  CLOSED
+}
+
+enum ReviewTargetType {
+  LISTING
+  LANDLORD
+  AGENT
+}
+
+enum ReviewStatus {
+  PUBLISHED
+  HIDDEN
+  REMOVED
+}
+
+model User {
+  id                      String                     @id @default(uuid()) @db.Uuid
+  email                   String                     @unique @db.VarChar(320)
+  firstName               String                     @db.VarChar(100)
+  lastName                String                     @db.VarChar(100)
+  passwordHash            String?                    @db.VarChar(255)
+  phone                   String?                    @unique @db.VarChar(32)
+  phoneVerifiedAt         DateTime?
+  emailVerifiedAt         DateTime?
+  profileImageUrl         String?                    @db.Text
+  profileImagePublicId    String?                    @db.VarChar(255)
+  bio                     String?                    @db.VarChar(1000)
+  status                  UserStatus                 @default(ACTIVE)
+  lastActiveAt            DateTime?
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
+  kyc                     KycProfile?
+  tenantProfile           TenantProfile?
+  landlordProfile         LandlordProfile?
+  agentProfile            AgentProfile?
+  userRoles               UserRole[]
+  directPermissions       UserPermission[]
+  refreshTokens           RefreshToken[]
+  phoneChallenges         PhoneVerificationChallenge[]
+  savedListings           SavedListing[]
+  listingsOwned           Listing[]                  @relation("ListingLandlord")
+  listingsCreated         Listing[]                  @relation("ListingCreator")
+  listingsManaged         Listing[]                  @relation("ListingAgent")
+  applicationsAsTenant    RentalApplication[]        @relation("ApplicationTenant")
+  applicationsAsLandlord  RentalApplication[]        @relation("ApplicationLandlord")
+  applicationsAsAgent     RentalApplication[]        @relation("ApplicationAgent")
+  tenanciesAsTenant       Tenancy[]                  @relation("TenancyTenant")
+  tenanciesAsLandlord     Tenancy[]                  @relation("TenancyLandlord")
+  tenanciesAsAgent        Tenancy[]                  @relation("TenancyAgent")
+  paymentsAsTenant        Payment[]                  @relation("PaymentTenant")
+  paymentsAsLandlord      Payment[]                  @relation("PaymentLandlord")
+  paymentsAsAgent         Payment[]                  @relation("PaymentAgent")
+  payoutRecipients        Payout[]                   @relation("PayoutRecipient")
+  maintenanceReported     MaintenanceRequest[]       @relation("MaintenanceReporter")
+  maintenanceForLandlord  MaintenanceRequest[]       @relation("MaintenanceLandlord")
+  maintenanceForAgent     MaintenanceRequest[]       @relation("MaintenanceAgent")
+  maintenanceAssigned     MaintenanceRequest[]       @relation("MaintenanceAssignee")
+  maintenanceUpdates      MaintenanceUpdate[]
+  conversationMemberships ConversationMember[]
+  messagesSent            Message[]                  @relation("MessageSender")
+  messageReceipts         MessageReceipt[]
+  notifications           Notification[]
+  notificationPreferences NotificationPreference[]
+  reviewsWritten          Review[]                   @relation("ReviewAuthor")
+  reviewsReceived         Review[]                   @relation("ReviewTargetUser")
+  incidentsReported       IncidentReport[]           @relation("IncidentReporter")
+  incidentsAssigned       IncidentReport[]           @relation("IncidentAssignee")
+  auditLogs               AuditLog[]                 @relation("AuditLogActor")
+  invitationsSent         AdminInvitation[]          @relation("AdminInvitationSender")
+  invitationAccepted      AdminInvitation?           @relation("AdminInvitationAccepted")
+
+  @@map("users")
+}
+
+model KycProfile {
+  id                    String    @id @default(uuid()) @db.Uuid
+  userId                String    @unique @db.Uuid
+  ninCiphertext         String?   @db.Text
+  ninLast4              String?   @db.Char(4)
+  ninStatus             KycStatus @default(NOT_STARTED)
+  phoneStatus           KycStatus @default(NOT_STARTED)
+  status                KycStatus @default(NOT_STARTED)
+  providerReference     String?   @unique @db.VarChar(255)
+  rejectionReason       String?   @db.VarChar(1000)
+  reviewedByUserId      String?   @db.Uuid
+  reviewedAt            DateTime?
+  submittedAt           DateTime?
+  verifiedAt            DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, submittedAt])
+  @@map("kyc_profiles")
+}
+
+model TenantProfile {
+  userId             String   @id @db.Uuid
+  occupation         String?  @db.VarChar(150)
+  defaultOccupants   Int      @default(1)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_profiles")
+}
+
+model LandlordProfile {
+  userId           String   @id @db.Uuid
+  businessName     String?  @db.VarChar(200)
+  payoutRecipientCode String? @db.VarChar(255)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("landlord_profiles")
+}
+
+model AgentProfile {
+  userId           String   @id @db.Uuid
+  companyName      String?  @db.VarChar(200)
+  licenceNumber    String?  @unique @db.VarChar(100)
+  payoutRecipientCode String? @db.VarChar(255)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("agent_profiles")
+}
+
+model PhoneVerificationChallenge {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  phone       String   @db.VarChar(32)
+  codeHash    String   @db.Char(64)
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  attempts    Int      @default(0)
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("phone_verification_challenges")
+}
+
+model Role {
+  id          String           @id @default(uuid()) @db.Uuid
+  code        RoleCode         @unique
+  name        String           @db.VarChar(100)
+  description String?          @db.VarChar(500)
+  isSystem    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String           @id @default(uuid()) @db.Uuid
+  key         PermissionKey    @unique
+  name        String           @db.VarChar(150)
+  description String?          @db.VarChar(500)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  roles       RolePermission[]
+  users       UserPermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  userId     String   @db.Uuid
+  roleId     String   @db.Uuid
+  assignedAt DateTime @default(now())
+  assignedBy String?  @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  roleId       String     @db.Uuid
+  permissionId String     @db.Uuid
+  assignedAt   DateTime   @default(now())
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model UserPermission {
+  userId       String           @db.Uuid
+  permissionId String           @db.Uuid
+  effect       PermissionEffect @default(ALLOW)
+  assignedAt   DateTime         @default(now())
+  assignedBy   String?          @db.Uuid
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission   Permission       @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+  @@index([permissionId])
+  @@map("user_permissions")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  tokenHash  String    @unique @db.Char(64)
+  familyId   String    @db.Uuid
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  userAgent  String?   @db.VarChar(500)
+  ipAddress  String?   @db.VarChar(64)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model Listing {
+  id                    String              @id @default(uuid()) @db.Uuid
+  slug                  String              @unique @db.VarChar(180)
+  title                 String              @db.VarChar(200)
+  description           String              @db.Text
+  propertyType          PropertyType
+  source                ListingSource       @default(LANDLORD)
+  status                ListingStatus       @default(DRAFT)
+  availability          ListingAvailability @default(AVAILABLE)
+  annualRentKobo        BigInt
+  serviceChargeKobo     BigInt              @default(0)
+  cautionFeeKobo        BigInt              @default(0)
+  bedrooms              Int
+  bathrooms             Int
+  state                 String              @db.VarChar(100)
+  area                  String              @db.VarChar(150)
+  address               String              @db.VarChar(500)
+  latitude              Decimal?            @db.Decimal(10, 7)
+  longitude             Decimal?            @db.Decimal(10, 7)
+  amenities             String[]
+  rules                 Json?
+  availableFrom         DateTime?
+  minimumLeaseMonths    Int                 @default(12)
+  publishedAt           DateTime?
+  archivedAt            DateTime?
+  moderationNote        String?             @db.VarChar(1000)
+  moderatedByUserId     String?             @db.Uuid
+  landlordId            String              @db.Uuid
+  createdById           String              @db.Uuid
+  managingAgentId       String?             @db.Uuid
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  landlord              User                @relation("ListingLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
+  createdBy             User                @relation("ListingCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  managingAgent         User?               @relation("ListingAgent", fields: [managingAgentId], references: [id], onDelete: SetNull)
+  images                ListingImage[]
+  savedBy               SavedListing[]
+  applications          RentalApplication[]
+  tenancies             Tenancy[]
+  payments              Payment[]
+  maintenanceRequests   MaintenanceRequest[]
+  conversations         Conversation[]
+  reviews               Review[]
+  incidents             IncidentReport[]
+
+  @@index([status, availability, state, area])
+  @@index([annualRentKobo])
+  @@index([landlordId, status])
+  @@index([managingAgentId, status])
+  @@map("listings")
+}
+
+model ListingImage {
+  id          String   @id @default(uuid()) @db.Uuid
+  listingId   String   @db.Uuid
+  url         String   @db.Text
+  publicId    String   @unique @db.VarChar(255)
+  altText     String?  @db.VarChar(255)
+  format      String?  @db.VarChar(30)
+  width       Int?
+  height      Int?
+  bytes       Int?
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId, position])
+  @@map("listing_images")
+}
+
+model SavedListing {
+  userId    String   @db.Uuid
+  listingId String   @db.Uuid
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@id([userId, listingId])
+  @@index([listingId])
+  @@map("saved_listings")
+}
+
+model RentalApplication {
+  id                String            @id @default(uuid()) @db.Uuid
+  listingId         String            @db.Uuid
+  tenantId          String            @db.Uuid
+  landlordId        String            @db.Uuid
+  agentId           String?           @db.Uuid
+  moveInDate        DateTime
+  leaseMonths       Int
+  occupation        String?           @db.VarChar(150)
+  occupantsCount    Int               @default(1)
+  messageToLandlord String?           @db.VarChar(2000)
+  status            ApplicationStatus @default(PENDING)
+  decisionReason    String?           @db.VarChar(1000)
+  decidedAt         DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  listing           Listing           @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  tenant            User              @relation("ApplicationTenant", fields: [tenantId], references: [id], onDelete: Restrict)
+  landlord          User              @relation("ApplicationLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
+  agent             User?             @relation("ApplicationAgent", fields: [agentId], references: [id], onDelete: SetNull)
+  payments          Payment[]
+  tenancy           Tenancy?
+
+  @@index([tenantId, status])
+  @@index([landlordId, status])
+  @@index([agentId, status])
+  @@index([listingId, status])
+  @@map("rental_applications")
+}
+
+model Tenancy {
+  id            String        @id @default(uuid()) @db.Uuid
+  applicationId String        @unique @db.Uuid
+  listingId     String        @db.Uuid
+  tenantId      String        @db.Uuid
+  landlordId    String        @db.Uuid
+  agentId       String?       @db.Uuid
+  startsAt      DateTime
+  endsAt        DateTime
+  status        TenancyStatus @default(PENDING_MOVE_IN)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  application   RentalApplication @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  listing       Listing       @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  tenant        User          @relation("TenancyTenant", fields: [tenantId], references: [id], onDelete: Restrict)
+  landlord      User          @relation("TenancyLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
+  agent         User?         @relation("TenancyAgent", fields: [agentId], references: [id], onDelete: SetNull)
+  maintenanceRequests MaintenanceRequest[]
+
+  @@index([listingId, status])
+  @@index([tenantId, status])
+  @@map("tenancies")
+}
+
+model Payment {
+  id                  String          @id @default(uuid()) @db.Uuid
+  reference           String          @unique @db.VarChar(100)
+  providerReference   String?         @unique @db.VarChar(150)
+  provider            PaymentProvider @default(PAYSTACK)
+  status              PaymentStatus   @default(INITIALIZED)
+  applicationId       String          @db.Uuid
+  listingId           String          @db.Uuid
+  tenantId            String          @db.Uuid
+  landlordId          String          @db.Uuid
+  agentId             String?         @db.Uuid
+  rentAmountKobo      BigInt
+  platformFeeKobo     BigInt
+  agentFeeKobo        BigInt          @default(0)
+  cautionFeeKobo      BigInt          @default(0)
+  totalAmountKobo     BigInt
+  currency            String          @default("NGN") @db.Char(3)
+  providerPayload     Json?
+  initializedAt       DateTime        @default(now())
+  verifiedAt          DateTime?
+  failedAt            DateTime?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  application         RentalApplication @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  listing             Listing         @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  tenant              User            @relation("PaymentTenant", fields: [tenantId], references: [id], onDelete: Restrict)
+  landlord            User            @relation("PaymentLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
+  agent               User?           @relation("PaymentAgent", fields: [agentId], references: [id], onDelete: SetNull)
+  escrow              EscrowRecord?
+  ledgerEntries       LedgerEntry[]
+  payouts             Payout[]
+
+  @@index([applicationId, status])
+  @@index([tenantId, createdAt])
+  @@index([landlordId, createdAt])
+  @@index([status, createdAt])
+  @@map("payments")
+}
+
+model EscrowRecord {
+  id                    String        @id @default(uuid()) @db.Uuid
+  paymentId             String        @unique @db.Uuid
+  status                EscrowStatus  @default(HELD)
+  cautionStatus         CautionStatus @default(NOT_APPLICABLE)
+  rentHeldKobo          BigInt
+  cautionHeldKobo       BigInt        @default(0)
+  releaseAuthorizedAt   DateTime?
+  releasedAt            DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  payment               Payment       @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  cautionDeductions     CautionDeduction[]
+
+  @@index([status, createdAt])
+  @@map("escrow_records")
+}
+
+model CautionDeduction {
+  id              String   @id @default(uuid()) @db.Uuid
+  escrowRecordId  String   @db.Uuid
+  amountKobo      BigInt
+  reason          String   @db.VarChar(1000)
+  evidence        Json?
+  proposedByUserId String  @db.Uuid
+  acceptedAt      DateTime?
+  disputedAt      DateTime?
+  resolvedAt      DateTime?
+  resolutionNote  String?  @db.VarChar(1000)
+  createdAt       DateTime @default(now())
+  escrowRecord    EscrowRecord @relation(fields: [escrowRecordId], references: [id], onDelete: Cascade)
+
+  @@index([escrowRecordId, createdAt])
+  @@map("caution_deductions")
+}
+
+model LedgerEntry {
+  id             String            @id @default(uuid()) @db.Uuid
+  paymentId      String            @db.Uuid
+  entryType      LedgerEntryType
+  debitAccount   LedgerAccountCode
+  creditAccount  LedgerAccountCode
+  amountKobo     BigInt
+  currency       String            @default("NGN") @db.Char(3)
+  idempotencyKey String            @unique @db.VarChar(180)
+  metadata       Json?
+  createdAt      DateTime          @default(now())
+  payment        Payment           @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId, createdAt])
+  @@index([entryType, createdAt])
+  @@map("ledger_entries")
+}
+
+model Payout {
+  id                String       @id @default(uuid()) @db.Uuid
+  paymentId         String       @db.Uuid
+  recipientUserId   String       @db.Uuid
+  kind              PayoutKind
+  status            PayoutStatus @default(PENDING)
+  amountKobo        BigInt
+  providerReference String?      @unique @db.VarChar(150)
+  failureReason     String?      @db.VarChar(1000)
+  scheduledAt       DateTime?
+  paidAt            DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  payment           Payment      @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  recipient         User         @relation("PayoutRecipient", fields: [recipientUserId], references: [id], onDelete: Restrict)
+
+  @@index([recipientUserId, status])
+  @@index([paymentId, kind])
+  @@map("payouts")
+}
+
+model WebhookEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  provider       PaymentProvider
+  eventType      String   @db.VarChar(120)
+  eventHash      String   @unique @db.Char(64)
+  payload        Json
+  processingError String? @db.VarChar(1000)
+  receivedAt     DateTime @default(now())
+  processedAt    DateTime?
+
+  @@index([provider, eventType, receivedAt])
+  @@map("webhook_events")
+}
+
+model MaintenanceRequest {
+  id            String              @id @default(uuid()) @db.Uuid
+  listingId     String              @db.Uuid
+  tenancyId     String?             @db.Uuid
+  reporterId    String              @db.Uuid
+  landlordId    String              @db.Uuid
+  agentId       String?             @db.Uuid
+  assignedToId  String?             @db.Uuid
+  title         String              @db.VarChar(200)
+  category      MaintenanceCategory
+  description   String              @db.Text
+  priority      MaintenancePriority @default(MEDIUM)
+  status        MaintenanceStatus  @default(OPEN)
+  resolvedAt    DateTime?
+  closedAt      DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  listing       Listing             @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  tenancy       Tenancy?            @relation(fields: [tenancyId], references: [id], onDelete: SetNull)
+  reporter      User                @relation("MaintenanceReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  landlord      User                @relation("MaintenanceLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
+  agent         User?               @relation("MaintenanceAgent", fields: [agentId], references: [id], onDelete: SetNull)
+  assignedTo    User?               @relation("MaintenanceAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  updates       MaintenanceUpdate[]
+  attachments   MaintenanceAttachment[]
+
+  @@index([listingId, status])
+  @@index([reporterId, status])
+  @@index([landlordId, status])
+  @@index([agentId, status])
+  @@map("maintenance_requests")
+}
+
+model MaintenanceUpdate {
+  id                   String             @id @default(uuid()) @db.Uuid
+  maintenanceRequestId String             @db.Uuid
+  authorId             String             @db.Uuid
+  body                 String?            @db.Text
+  fromStatus           MaintenanceStatus?
+  toStatus             MaintenanceStatus?
+  createdAt            DateTime           @default(now())
+  maintenanceRequest   MaintenanceRequest @relation(fields: [maintenanceRequestId], references: [id], onDelete: Cascade)
+  author               User               @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([maintenanceRequestId, createdAt])
+  @@map("maintenance_updates")
+}
+
+model MaintenanceAttachment {
+  id                   String             @id @default(uuid()) @db.Uuid
+  maintenanceRequestId String             @db.Uuid
+  url                  String             @db.Text
+  publicId             String             @unique @db.VarChar(255)
+  format               String?            @db.VarChar(30)
+  bytes                Int?
+  createdAt            DateTime           @default(now())
+  maintenanceRequest   MaintenanceRequest @relation(fields: [maintenanceRequestId], references: [id], onDelete: Cascade)
+
+  @@index([maintenanceRequestId])
+  @@map("maintenance_attachments")
+}
+
+model Conversation {
+  id              String             @id @default(uuid()) @db.Uuid
+  listingId       String?            @db.Uuid
+  type            ConversationType   @default(LISTING_ENQUIRY)
+  subject         String?            @db.VarChar(255)
+  lastMessageAt   DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  listing         Listing?           @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  members         ConversationMember[]
+  messages        Message[]
+
+  @@index([listingId, lastMessageAt])
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+model ConversationMember {
+  conversationId String       @db.Uuid
+  userId         String       @db.Uuid
+  joinedAt       DateTime     @default(now())
+  lastReadAt     DateTime?
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@index([userId, lastReadAt])
+  @@map("conversation_members")
+}
+
+model Message {
+  id             String       @id @default(uuid()) @db.Uuid
+  conversationId String       @db.Uuid
+  senderId       String?      @db.Uuid
+  kind           MessageKind  @default(USER)
+  body           String       @db.Text
+  createdAt      DateTime     @default(now())
+  editedAt       DateTime?
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User?        @relation("MessageSender", fields: [senderId], references: [id], onDelete: SetNull)
+  receipts       MessageReceipt[]
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+model MessageReceipt {
+  messageId  String   @db.Uuid
+  userId     String   @db.Uuid
+  readAt     DateTime @default(now())
+  message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId, readAt])
+  @@map("message_receipts")
+}
+
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @db.Uuid
+  type      NotificationType
+  title     String           @db.VarChar(255)
+  body      String           @db.VarChar(1000)
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  userId    String              @db.Uuid
+  type      NotificationType
+  channel   NotificationChannel
+  enabled   Boolean             @default(true)
+  updatedAt DateTime            @updatedAt
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, type, channel])
+  @@map("notification_preferences")
+}
+
+model Review {
+  id             String           @id @default(uuid()) @db.Uuid
+  listingId      String?          @db.Uuid
+  authorId       String           @db.Uuid
+  targetUserId   String?          @db.Uuid
+  targetType     ReviewTargetType
+  score          Int
+  body           String           @db.VarChar(2000)
+  status         ReviewStatus     @default(PUBLISHED)
+  reportedAt     DateTime?
+  moderationNote String?          @db.VarChar(1000)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  listing        Listing?         @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  author         User             @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  targetUser     User?            @relation("ReviewTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([listingId, status, createdAt])
+  @@index([targetUserId, status, createdAt])
+  @@map("reviews")
+}
+
+model IncidentReport {
+  id                 String           @id @default(uuid()) @db.Uuid
+  reference          String           @unique @db.VarChar(40)
+  reporterId         String           @db.Uuid
+  listingId          String?          @db.Uuid
+  assignedToUserId   String?          @db.Uuid
+  type               IncidentType
+  severity           IncidentSeverity
+  description        String           @db.Text
+  occurredAt         DateTime?
+  confidential       Boolean          @default(true)
+  status             IncidentStatus   @default(SUBMITTED)
+  resolutionNote     String?          @db.VarChar(2000)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  reporter           User             @relation("IncidentReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  listing            Listing?         @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  assignedTo         User?            @relation("IncidentAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  evidence           IncidentEvidence[]
+
+  @@index([status, severity, createdAt])
+  @@index([reporterId, createdAt])
+  @@map("incident_reports")
+}
+
+model IncidentEvidence {
+  id               String         @id @default(uuid()) @db.Uuid
+  incidentReportId String         @db.Uuid
+  url              String         @db.Text
+  publicId         String         @unique @db.VarChar(255)
+  format           String?        @db.VarChar(30)
+  bytes            Int?
+  createdAt        DateTime       @default(now())
+  incidentReport   IncidentReport @relation(fields: [incidentReportId], references: [id], onDelete: Cascade)
+
+  @@index([incidentReportId])
+  @@map("incident_evidence")
+}
+
+model AdminInvitation {
+  id                String    @id @default(uuid()) @db.Uuid
+  email             String    @unique @db.VarChar(320)
+  tokenHash         String    @unique @db.Char(64)
+  role              RoleCode  @default(ADMIN)
+  adminTitle        String?   @db.VarChar(150)
+  invitedByUserId   String    @db.Uuid
+  acceptedByUserId  String?   @unique @db.Uuid
+  expiresAt         DateTime
+  acceptedAt        DateTime?
+  revokedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  invitedBy         User      @relation("AdminInvitationSender", fields: [invitedByUserId], references: [id], onDelete: Restrict)
+  acceptedBy        User?     @relation("AdminInvitationAccepted", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([expiresAt])
+  @@map("admin_invitations")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  actorUserId String?  @db.Uuid
+  action      String   @db.VarChar(150)
+  entityType  String   @db.VarChar(100)
+  entityId    String?  @db.VarChar(128)
+  metadata    Json?
+  ipAddress   String?  @db.VarChar(64)
+  createdAt   DateTime @default(now())
+  actor       User?    @relation("AuditLogActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
