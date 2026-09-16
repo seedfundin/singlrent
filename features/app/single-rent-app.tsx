@@ -397,108 +397,132 @@ function Landing({ go }: { go: (v: View) => void }) {
     <>
       <Header go={go} />
       <div className="landing">
-        <section className="hero">
-          <div>
-            <Status tone="gold">
-              <Sparkles size={12} />
-              Rental, without the runaround
-            </Status>
+        <section className="hero solo-hero">
+          <div className="hero-copy">
+            <span className="hero-kicker">
+              <i /> Built for one-person moves in Lagos
+            </span>
             <h1>
-              Find a place.
+              Your own space in Lagos.
               <br />
-              <em>Deal direct.</em>
+              <em>Without the agent wahala.</em>
             </h1>
             <p>
-              Discover verified homes, ask the questions that matter and rent
-              directly from landlords — no inspection agents, no hidden fees.
+              SingleRent helps corps members, young professionals and anyone
+              moving solo find verified rooms, studios and shared flats —
+              directly from the people who own them.
             </p>
             <div className="searchbox">
               <span>
                 <MapPin size={18} />
                 <i>
-                  Where do you want to live?<b>Lekki, Lagos</b>
+                  Where are you moving to?<b>Yaba, Surulere, Ikeja...</b>
                 </i>
                 <ChevronDown size={16} />
               </span>
               <Button onClick={() => go("explore")}>
                 <Search size={16} />
-                Search homes
+                Find a room
               </Button>
             </div>
             <small className="trust">
               <BadgeCheck size={14} />
-              Every home verified <ShieldCheck size={14} />
-              Rent held safely in escrow
+              Verified listings <ShieldCheck size={14} />
+              Direct landlord chat <KeyRound size={14} />
+              Protected payments
             </small>
           </div>
           <figure>
             <Img
               src="/hero-mainland-lagos-flat.png"
-              alt="Interior of a typical mainland Lagos two-bedroom flat"
+              alt="Bright interior of a comfortable mainland Lagos flat"
             />
-            <div className="float verified">
-              <BadgeCheck size={17} />
-              <b>
-                1,240+<small>verified homes</small>
-              </b>
+            <div className="move-note">
+              <Status tone="gold">Moving soon?</Status>
+              <b>Settle in before your next chapter starts.</b>
+              <span>
+                NYSC posting · first job · new city
+              </span>
             </div>
-            <div className="float ai">
-              <i>AO</i>
+            <div className="float solo-match">
+              <i>SR</i>
               <b>
-                Ask before you visit<small>Property AI is always on</small>
+                Private room or studio?<small>Filter for the way you live</small>
               </b>
             </div>
           </figure>
         </section>
+        <section className="move-reasons" aria-label="Who SingleRent is for">
+          <button onClick={() => go("explore")}>
+            <i><CalendarDays size={18} /></i>
+            <span><b>Starting NYSC in Lagos?</b><small>Find a room before camp ends.</small></span>
+            <ArrowRight size={16} />
+          </button>
+          <button onClick={() => go("explore")}>
+            <i><KeyRound size={18} /></i>
+            <span><b>Moving for your first job?</b><small>Choose a space that fits your budget.</small></span>
+            <ArrowRight size={16} />
+          </button>
+          <button onClick={() => go("sign-up")}>
+            <i><Building2 size={18} /></i>
+            <span><b>Have a room to let?</b><small>Meet verified tenants directly.</small></span>
+            <ArrowRight size={16} />
+          </button>
+        </section>
         <section className="section">
           <div className="section-h">
             <span>
-              <small>Homes made simple</small>
-              <h2>Featured homes in Lagos</h2>
+              <small>Move-in ready for one</small>
+              <h2>Rooms and flats for your next move</h2>
             </span>
             <Button variant="ghost" onClick={() => go("explore")}>
-              View all homes <ArrowRight size={14} />
+              Explore available spaces <ArrowRight size={14} />
             </Button>
           </div>
           <div className="cards">
-            <Card go={go} />
-            <Card
-              go={go}
-              src={photos.suite}
-              title="Calm 3 bedroom in Ikoyi"
-              area="Bourdillon, Ikoyi, Lagos"
-              price="₦8,500,000 / year"
-            />
             <Card
               go={go}
               src={photos.building}
-              title="New 1 bedroom flat"
-              area="Yaba, Lagos"
-              price="₦2,400,000 / year"
+              title="Private room in a shared 2-bed flat"
+              area="Onike, Yaba, Lagos"
+              price="₦850,000 / year"
+            />
+            <Card
+              go={go}
+              src={photos.suite}
+              title="Self-contained studio near UNILAG"
+              area="Akoka, Lagos"
+              price="₦1,200,000 / year"
+            />
+            <Card
+              go={go}
+              title="Compact 1-bedroom with steady power"
+              area="Aguda, Surulere, Lagos"
+              price="₦1,650,000 / year"
             />
           </div>
         </section>
         <section className="how">
           <div>
-            <small>A better way to rent</small>
-            <h2>Everything you need to choose with confidence.</h2>
+            <small>Made for a fresh start</small>
+            <h2>From “I’m moving” to “I’m settled” — without the stress.</h2>
           </div>
           <div>
             {[
               [
                 "01",
-                "Discover verified homes",
-                "Clear photos, real details and a verification badge you can trust.",
+                "Find your kind of space",
+                "Search rooms, studios and shared flats in the neighbourhoods that work for you.",
               ],
               [
                 "02",
-                "Ask smarter questions",
-                "Get instant answers from Property AI or the landlord.",
+                "Know before you visit",
+                "See clear details, ask the landlord the important questions and avoid wasted trips.",
               ],
               [
                 "03",
-                "Pay with protection",
-                "Your rent stays in escrow until your rental is confirmed.",
+                "Move in with confidence",
+                "Your payment is protected while you confirm the home is right for you.",
               ],
             ].map(([n, t, p]) => (
               <article key={n}>
@@ -514,24 +538,26 @@ function Landing({ go }: { go: (v: View) => void }) {
             <i>
               <UserRound />
             </i>
-            <h3>For tenants</h3>
+            <small>For tenants</small>
+            <h3>Find your place, not just any place.</h3>
             <p>
-              No agents. No inspection fees. Just a clear, trusted path home.
+              Start with a room or flat that suits your budget, commute and next chapter — without agent pressure.
             </p>
             <button onClick={() => go("sign-up")}>
-              Create an account <ArrowRight size={14} />
+              Find your space <ArrowRight size={14} />
             </button>
           </article>
           <article>
             <i>
               <Building2 />
             </i>
-            <h3>For landlords</h3>
+            <small>For landlords</small>
+            <h3>Let your spare room with more certainty.</h3>
             <p>
-              List quality homes, meet verified tenants and stay in control.
+              Present your space clearly, speak to verified tenants and retain control of your listing.
             </p>
             <button onClick={() => go("sign-up")}>
-              Get started as a landlord <ArrowRight size={14} />
+              List your space <ArrowRight size={14} />
             </button>
           </article>
         </section>
