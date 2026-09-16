@@ -398,25 +398,30 @@ function Landing({ go }: { go: (v: View) => void }) {
       <Header go={go} />
       <div className="landing">
         <section className="hero solo-hero">
-          <div className="hero-copy">
+          <motion.div
+            className="hero-copy"
+            initial={{ opacity: 0, y: 26 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7, ease: "easeOut" }}
+          >
             <span className="hero-kicker">
-              <i /> Built for one-person moves in Lagos
+              <i /> Built for one-person moves, everywhere
             </span>
             <h1>
-              Your own space in Lagos.
+              Your own space.
               <br />
               <em>Without the agent wahala.</em>
             </h1>
             <p>
               SingleRent helps corps members, young professionals and anyone
               moving solo find verified rooms, studios and shared flats —
-              directly from the people who own them.
+              in the city they are heading to, directly from the people who own them.
             </p>
             <div className="searchbox">
               <span>
                 <MapPin size={18} />
                 <i>
-                  Where are you moving to?<b>Yaba, Surulere, Ikeja...</b>
+                  Where are you moving to?<b>Abuja, Ibadan, Enugu...</b>
                 </i>
                 <ChevronDown size={16} />
               </span>
@@ -431,11 +436,15 @@ function Landing({ go }: { go: (v: View) => void }) {
               Direct landlord chat <KeyRound size={14} />
               Protected payments
             </small>
-          </div>
-          <figure>
+          </motion.div>
+          <motion.figure
+            initial={{ opacity: 0, scale: 1.04 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.9, ease: "easeOut", delay: 0.12 }}
+          >
             <Img
-              src="/hero-mainland-lagos-flat.png"
-              alt="Bright interior of a comfortable mainland Lagos flat"
+              src="/hero-lagos-room.png"
+              alt="Comfortable, modest room in a typical Lagos flat"
             />
             <div className="move-note">
               <Status tone="gold">Moving soon?</Status>
@@ -450,59 +459,101 @@ function Landing({ go }: { go: (v: View) => void }) {
                 Private room or studio?<small>Filter for the way you live</small>
               </b>
             </div>
-          </figure>
+          </motion.figure>
         </section>
         <section className="move-reasons" aria-label="Who SingleRent is for">
-          <button onClick={() => go("explore")}>
+          <motion.button
+            onClick={() => go("explore")}
+            whileHover={{ y: -4 }}
+            whileTap={{ scale: 0.98 }}
+          >
             <i><CalendarDays size={18} /></i>
-            <span><b>Starting NYSC in Lagos?</b><small>Find a room before camp ends.</small></span>
+            <span><b>Starting NYSC?</b><small>Find a home near your place of primary assignment.</small></span>
             <ArrowRight size={16} />
-          </button>
-          <button onClick={() => go("explore")}>
+          </motion.button>
+          <motion.button
+            onClick={() => go("explore")}
+            whileHover={{ y: -4 }}
+            whileTap={{ scale: 0.98 }}
+          >
             <i><KeyRound size={18} /></i>
-            <span><b>Moving for your first job?</b><small>Choose a space that fits your budget.</small></span>
+            <span><b>Moving for your first job?</b><small>Choose a space that fits your budget and commute.</small></span>
             <ArrowRight size={16} />
-          </button>
-          <button onClick={() => go("sign-up")}>
+          </motion.button>
+          <motion.button
+            onClick={() => go("sign-up")}
+            whileHover={{ y: -4 }}
+            whileTap={{ scale: 0.98 }}
+          >
             <i><Building2 size={18} /></i>
             <span><b>Have a room to let?</b><small>Meet verified tenants directly.</small></span>
             <ArrowRight size={16} />
-          </button>
+          </motion.button>
         </section>
-        <section className="section">
+        <motion.section
+          className="living-styles"
+          initial={{ opacity: 0, y: 28 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.2 }}
+          transition={{ duration: 0.55, ease: "easeOut" }}
+        >
+          <div className="living-styles-intro">
+            <small>Choose the way you want to live</small>
+            <h2>Not everyone needs a whole apartment.</h2>
+            <p>
+              Start with the kind of space that makes sense for this season of your life.
+            </p>
+            <Button variant="outline" onClick={() => go("explore")}>
+              Browse all spaces <ArrowRight size={14} />
+            </Button>
+          </div>
+          <div className="style-options">
+            <motion.button whileHover={{ y: -7 }} onClick={() => go("explore")}>
+              <i><BedDouble size={22} /></i>
+              <span><small>01</small><b>Private rooms</b><p>Your own room in a shared home, with a clearer monthly picture.</p></span>
+              <ArrowRight size={16} />
+            </motion.button>
+            <motion.button whileHover={{ y: -7 }} onClick={() => go("explore")}>
+              <i><Home size={22} /></i>
+              <span><small>02</small><b>Self-contained studios</b><p>A compact place to call yours when privacy is the priority.</p></span>
+              <ArrowRight size={16} />
+            </motion.button>
+            <motion.button whileHover={{ y: -7 }} onClick={() => go("explore")}>
+              <i><Users size={22} /></i>
+              <span><small>03</small><b>Shared flats</b><p>More space and shared costs, for people open to living together.</p></span>
+              <ArrowRight size={16} />
+            </motion.button>
+          </div>
+        </motion.section>
+        <motion.section
+          className="section"
+          initial={{ opacity: 0, y: 28 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.16 }}
+          transition={{ duration: 0.55, ease: "easeOut" }}
+        >
           <div className="section-h">
             <span>
               <small>Move-in ready for one</small>
-              <h2>Rooms and flats for your next move</h2>
+              <h2>Spaces for wherever your next move takes you</h2>
             </span>
             <Button variant="ghost" onClick={() => go("explore")}>
               Explore available spaces <ArrowRight size={14} />
             </Button>
           </div>
           <div className="cards">
-            <Card
-              go={go}
-              src={photos.building}
-              title="Private room in a shared 2-bed flat"
-              area="Onike, Yaba, Lagos"
-              price="₦850,000 / year"
-            />
-            <Card
-              go={go}
-              src={photos.suite}
-              title="Self-contained studio near UNILAG"
-              area="Akoka, Lagos"
-              price="₦1,200,000 / year"
-            />
-            <Card
-              go={go}
-              title="Compact 1-bedroom with steady power"
-              area="Aguda, Surulere, Lagos"
-              price="₦1,650,000 / year"
-            />
+            <motion.div whileHover={{ y: -6 }} transition={{ duration: 0.2 }}><Card go={go} src={photos.building} title="Private room in a shared 2-bed flat" area="Gwarinpa, Abuja" price="₦850,000 / year" /></motion.div>
+            <motion.div whileHover={{ y: -6 }} transition={{ duration: 0.2 }}><Card go={go} src={photos.suite} title="Self-contained studio near the university" area="Bodija, Ibadan" price="₦1,200,000 / year" /></motion.div>
+            <motion.div whileHover={{ y: -6 }} transition={{ duration: 0.2 }}><Card go={go} title="Compact 1-bedroom close to work" area="New Haven, Enugu" price="₦1,650,000 / year" /></motion.div>
           </div>
-        </section>
-        <section className="how">
+        </motion.section>
+        <motion.section
+          className="how"
+          initial={{ opacity: 0, y: 28 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.15 }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+        >
           <div>
             <small>Made for a fresh start</small>
             <h2>From “I’m moving” to “I’m settled” — without the stress.</h2>
@@ -532,8 +583,33 @@ function Landing({ go }: { go: (v: View) => void }) {
               </article>
             ))}
           </div>
-        </section>
-        <section className="benefits">
+        </motion.section>
+        <motion.section
+          className="renter-confidence"
+          initial={{ opacity: 0, y: 28 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.18 }}
+          transition={{ duration: 0.55, ease: "easeOut" }}
+        >
+          <div className="confidence-copy">
+            <small>Less guesswork. More clarity.</small>
+            <h2>Renting alone comes with questions. Keep the important answers close.</h2>
+            <p>SingleRent keeps the details, conversations and payment journey in one clear place.</p>
+            <Button onClick={() => go("explore")}>Start exploring <ArrowRight size={14} /></Button>
+          </div>
+          <div className="confidence-list">
+            <article><i><BadgeCheck size={19} /></i><span><b>Verified listing signals</b><p>Know which homes and hosts have passed the platform’s checks.</p></span></article>
+            <article><i><MessageCircle size={19} /></i><span><b>Questions before the journey</b><p>Get the practical details before you spend on transport or inspections.</p></span></article>
+            <article><i><WalletCards size={19} /></i><span><b>A clearer payment path</b><p>See what you are paying for and move forward with protection.</p></span></article>
+          </div>
+        </motion.section>
+        <motion.section
+          className="benefits"
+          initial={{ opacity: 0, y: 28 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.2 }}
+          transition={{ duration: 0.55, ease: "easeOut" }}
+        >
           <article>
             <i>
               <UserRound />
@@ -560,7 +636,7 @@ function Landing({ go }: { go: (v: View) => void }) {
               List your space <ArrowRight size={14} />
             </button>
           </article>
-        </section>
+        </motion.section>
         <footer>
           <Brand go={go} />
           <span>Renting in Nigeria, made more direct.</span>
