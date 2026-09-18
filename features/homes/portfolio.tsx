@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   ArrowRight,
@@ -23,46 +24,50 @@ import {
 import { Button } from '@/components/ui/button';
 import { Shell } from '@/features/app/single-rent-app';
 import type { View } from '@/lib/routes';
+import { api, type ApiListing, type ApiMaintenanceRequest, sessionStore } from '@/lib/api';
+import { formatNaira } from '@/lib/pricing';
 import './portfolio.css';
 
-type Go = (view: View) => void;
+type Go = (view: View, query?: Record<string, string>) => void;
 type Manager = 'landlord' | 'agent';
 
-const homes = [
-  {
-    name: 'Light-filled 2 bedroom apartment',
-    area: 'Lekki Phase 1, Lagos',
-    rent: '₦4,800,000 / year',
-    status: 'Occupied',
-    tenant: 'Adaeze Okafor',
-    tenancy: 'Ends 31 Aug 2027',
-    issue: '1 repair in progress',
-    image:
-      'https://d1o88e3pxnk9ri.cloudfront.net/uploads/property/DEC2024/0223758001733920118-property-DEC2024.jpeg',
-  },
-  {
-    name: '3 bedroom apartment, Ikoyi',
-    area: 'Bourdillon Road, Ikoyi',
-    rent: '₦8,500,000 / year',
-    status: 'Occupied',
-    tenant: 'Mariam Bello',
-    tenancy: 'Ends 14 Mar 2027',
-    issue: 'No open issues',
-    image:
-      'https://images.trvl-media.com/lodging/112000000/111750000/111748200/111748150/93d43aff.jpg?impolicy=resizecrop&ra=fill&rh=575&rw=575',
-  },
-  {
-    name: 'Studio on Admiralty Way',
-    area: 'Lekki Phase 1, Lagos',
-    rent: '₦1,850,000 / year',
-    status: 'Available',
-    tenant: 'No current tenant',
-    tenancy: 'Published 3 days ago',
-    issue: 'No open issues',
-    image:
-      'https://images.nigeriapropertycentre.com/properties/images/3294165/0696896bc6e46e-fully-service-2bedroom-apartment-for-rent-lekki-lagos.jpg',
-  },
-];
+function nairaFromKobo(value: string | number) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount / 100 : 0;
+}
+
+function homeImage(home: ApiListing) {
+  return home.images[0]?.url;
+}
+
+function HomePhoto({ home, alt = '' }: { home: ApiListing; alt?: string }) {
+  const image = homeImage(home);
+  return image ? <img src={image} alt={alt || home.title} referrerPolicy="no-referrer" /> : <span className="portfolio-photo-empty"><Building2 size={18} /> Photo pending</span>;
+}
+
+function useListings(kind: 'saved' | 'mine') {
+  const [homes, setHomes] = useState<ApiListing[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const load = () => {
+    const session = sessionStore.get();
+    if (!session) {
+      setHomes([]);
+      setError('Sign in to view your homes.');
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    const request = kind === 'saved' ? api.listings.saved(session.accessToken, { pageSize: 50 }) : api.listings.mine(session.accessToken, { pageSize: 50 });
+    request
+      .then((response) => setHomes(response.items))
+      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'Unable to load homes.'))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, [kind]);
+  return { homes, loading, error, reload: load, setHomes };
+}
 
 function Status({
   children,
@@ -102,7 +107,19 @@ function managerCopy(manager: Manager) {
 }
 
 export function SavedHomes({ go }: { go: Go }) {
-  const [saved, setSaved] = useState(homes);
+  const { homes: saved, loading, error, setHomes } = useListings('saved');
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const remove = async (home: ApiListing) => {
+    const session = sessionStore.get();
+    if (!session) return go('sign-in');
+    setRemovingId(home.id);
+    try {
+      await api.listings.unsave(session.accessToken, home.id);
+      setHomes((current) => current.filter((item) => item.id !== home.id));
+    } finally {
+      setRemovingId(null);
+    }
+  };
 
   return (
     <Shell go={go} title="Saved homes">
@@ -118,11 +135,13 @@ export function SavedHomes({ go }: { go: Go }) {
           </Button>
         </div>
 
-        {saved.length ? (
+        {loading ? <section className="saved-empty panel"><Clock3 size={22} /><h2>Loading saved homes…</h2></section> : error ? (
+          <section className="saved-empty panel"><CircleAlert size={22} /><h2>{error}</h2><Button onClick={() => go('sign-in')}>Sign in</Button></section>
+        ) : saved.length ? (
           <div className="saved-home-grid">
             {saved.map((home) => (
-              <article className="saved-home-card" key={home.name}>
-                <img src={home.image} alt={home.name} referrerPolicy="no-referrer" />
+              <article className="saved-home-card" key={home.id}>
+                <HomePhoto home={home} />
                 <div className="saved-home-copy">
                   <div>
                     <Status tone="green">
@@ -130,25 +149,22 @@ export function SavedHomes({ go }: { go: Go }) {
                     </Status>
                     <button
                       className="saved-heart"
-                      aria-label={`Remove ${home.name} from saved homes`}
-                      onClick={() =>
-                        setSaved((current) =>
-                          current.filter((item) => item.name !== home.name),
-                        )
-                      }
+                      aria-label={`Remove ${home.title} from saved homes`}
+                      onClick={() => void remove(home)}
+                      disabled={removingId === home.id}
                     >
                       <Heart size={16} fill="currentColor" />
                     </button>
                   </div>
-                  <strong>{home.rent}</strong>
-                  <h2>{home.name}</h2>
+                  <strong>{formatNaira(nairaFromKobo(home.annualRentKobo))} / year</strong>
+                  <h2>{home.title}</h2>
                   <p>
-                    <MapPin size={13} /> {home.area}
+                    <MapPin size={13} /> {home.area}, {home.state}
                   </p>
                   <span className="saved-home-specs">
-                    <BedDouble size={14} /> 2 beds <Bath size={14} /> 2 baths
+                    <BedDouble size={14} /> {home.bedrooms} beds <Bath size={14} /> {home.bathrooms} baths
                   </span>
-                  <Button variant="outline" onClick={() => go('listing')}>
+                  <Button variant="outline" onClick={() => go('listing', { listing: home.id })}>
                     View home <ArrowRight size={14} />
                   </Button>
                 </div>
@@ -179,6 +195,9 @@ export function ManagedHomes({
 }) {
   const copy = managerCopy(manager);
   const views = managerViews(manager);
+  const { homes, loading, error } = useListings('mine');
+  const available = homes.filter((home) => home.availability === 'AVAILABLE').length;
+  const maintenance = homes.reduce((count, home) => count + home._count.maintenanceRequests, 0);
 
   return (
     <Shell go={go} role={manager} title={copy.heading}>
@@ -197,18 +216,18 @@ export function ManagedHomes({
         <section className="home-portfolio-summary">
           <span>
             <Building2 size={17} />
-            <b>3 homes</b>
-            <small>2 occupied · 1 available</small>
+            <b>{homes.length} {homes.length === 1 ? 'home' : 'homes'}</b>
+            <small>{available} available</small>
           </span>
           <span>
             <Users size={17} />
-            <b>2 active tenancies</b>
-            <small>Both tenants are KYC verified</small>
+            <b>{homes.reduce((count, home) => count + home._count.applications, 0)} applications</b>
+            <small>Application data for your listings</small>
           </span>
           <span>
             <Wrench size={17} />
-            <b>1 open maintenance case</b>
-            <small>Bathroom shower pressure · Lekki</small>
+            <b>{maintenance} maintenance cases</b>
+            <small>Across your current homes</small>
           </span>
         </section>
 
@@ -219,40 +238,40 @@ export function ManagedHomes({
             <span>Maintenance</span>
             <span />
           </div>
-          {homes.map((home) => (
+          {loading ? <div className="portfolio-empty">Loading your homes…</div> : error ? <div className="portfolio-empty">{error}</div> : homes.length ? homes.map((home) => (
             <button
               className="portfolio-row"
-              key={home.name}
-              onClick={() => go(views.home)}
+              key={home.id}
+              onClick={() => go(views.home, { listing: home.id })}
             >
               <span className="portfolio-property">
-                <img src={home.image} alt="" referrerPolicy="no-referrer" />
+                <HomePhoto home={home} />
                 <span>
-                  <b>{home.name}</b>
+                  <b>{home.title}</b>
                   <small>
-                    <MapPin size={11} /> {home.area} · {home.rent}
+                    <MapPin size={11} /> {home.area}, {home.state} · {formatNaira(nairaFromKobo(home.annualRentKobo))} / year
                   </small>
-                  <Status tone={home.status === 'Occupied' ? 'green' : 'slate'}>
-                    {home.status}
+                  <Status tone={home.availability === 'AVAILABLE' ? 'green' : 'slate'}>
+                    {home.availability.toLowerCase()}
                   </Status>
                 </span>
               </span>
               <span className="portfolio-tenant">
-                <i>{home.tenant === 'Adaeze Okafor' ? 'AO' : home.tenant === 'Mariam Bello' ? 'MB' : '—'}</i>
+                <i>{home._count.applications}</i>
                 <span>
-                  <b>{home.tenant}</b>
-                  <small>{home.tenancy}</small>
+                  <b>{home._count.applications ? `${home._count.applications} applications` : 'No applications yet'}</b>
+                  <small>Tenancy data appears after an application is approved.</small>
                 </span>
               </span>
               <span className="portfolio-maintenance">
-                <Status tone={home.issue.includes('1 repair') ? 'gold' : 'slate'}>
-                  {home.issue.includes('1 repair') ? <Wrench size={11} /> : <Check size={11} />}
-                  {home.issue}
+                <Status tone={home._count.maintenanceRequests ? 'gold' : 'slate'}>
+                  {home._count.maintenanceRequests ? <Wrench size={11} /> : <Check size={11} />}
+                  {home._count.maintenanceRequests ? `${home._count.maintenanceRequests} open cases` : 'No open issues'}
                 </Status>
               </span>
               <ArrowRight size={15} />
             </button>
-          ))}
+          )) : <div className="portfolio-empty">You have not created any homes yet.</div>}
         </section>
       </div>
     </Shell>
@@ -268,7 +287,26 @@ export function ManagedHomeDetails({
 }) {
   const copy = managerCopy(manager);
   const views = managerViews(manager);
-  const home = homes[0];
+  const searchParams = useSearchParams();
+  const listingId = searchParams.get('listing');
+  const [home, setHome] = useState<ApiListing | null>(null);
+  const [loading, setLoading] = useState(Boolean(listingId));
+  const [error, setError] = useState<string | null>(listingId ? null : 'Select one of your homes to view its details.');
+  useEffect(() => {
+    if (!listingId) return;
+    api.listings.detail(listingId)
+      .then(setHome)
+      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'Unable to load this home.'))
+      .finally(() => setLoading(false));
+  }, [listingId]);
+
+  if (loading || error || !home) {
+    return (
+      <Shell go={go} role={manager} title="Home details">
+        <div className="page"><button className="back" onClick={() => go(views.homes)}><ArrowLeft size={14} /> {copy.heading}</button><section className="saved-empty panel"><Building2 size={22} /><h2>{loading ? 'Loading home details…' : error}</h2><Button onClick={() => go(views.homes)}>Back to {copy.heading}</Button></section></div>
+      </Shell>
+    );
+  }
 
   return (
     <Shell go={go} role={manager} title="Home details">
@@ -277,21 +315,21 @@ export function ManagedHomeDetails({
           <ArrowLeft size={14} /> {copy.heading}
         </button>
         <section className="home-detail-hero">
-          <img src={home.image} alt={home.name} referrerPolicy="no-referrer" />
+          <HomePhoto home={home} />
           <span>
             <small>{copy.owner}</small>
-            <h1>{home.name}</h1>
+            <h1>{home.title}</h1>
             <p>
-              <MapPin size={13} /> {home.area}
+              <MapPin size={13} /> {home.address}, {home.area}, {home.state}
             </p>
             <div>
               <Status>
-                <CircleCheck size={11} /> Occupied
+                <CircleCheck size={11} /> {home.availability.toLowerCase()}
               </Status>
               <Status tone="blue">
-                <BedDouble size={11} /> 2 bedrooms
+                <BedDouble size={11} /> {home.bedrooms} bedrooms
               </Status>
-              <Status tone="gold">₦4.8m / year</Status>
+              <Status tone="gold">{formatNaira(nairaFromKobo(home.annualRentKobo))} / year</Status>
             </div>
           </span>
         </section>
@@ -303,37 +341,34 @@ export function ManagedHomeDetails({
                 <small>Current occupants</small>
                 <h2>Who is living here</h2>
               </span>
-              <Status tone="green">
-                <ShieldCheck size={11} /> KYC verified
-              </Status>
             </div>
             <div className="occupant-row">
-              <i>AO</i>
+              <i>{home._count.applications}</i>
               <span>
-                <b>Adaeze Okafor</b>
-                <small>Primary tenant · +234 803 555 0142</small>
+                <b>{home._count.applications ? `${home._count.applications} application${home._count.applications === 1 ? '' : 's'}` : 'No current tenant'}</b>
+                <small>Approved tenancy and occupant details appear here once the rental is active.</small>
               </span>
-              <Status>Active tenancy</Status>
+              <Status tone={home._count.applications ? 'gold' : 'slate'}>{home._count.applications ? 'Applications received' : 'Awaiting applications'}</Status>
             </div>
             <div className="occupant-row empty-occupant">
               <i>
                 <UserRound size={14} />
               </i>
               <span>
-                <b>No additional occupant declared</b>
-                <small>Occupant information is updated by the tenant.</small>
+                <b>Occupant details are not available yet</b>
+                <small>They are recorded when a tenancy is created.</small>
               </span>
             </div>
           </section>
 
           <section className="panel tenancy-card">
             <small>Tenancy</small>
-            <strong>₦4,800,000</strong>
-            <span>Annual rent · Paid via SingleRent</span>
+            <strong>{formatNaira(nairaFromKobo(home.annualRentKobo))}</strong>
+            <span>Annual rent · Payment records appear after checkout</span>
             <div>
-              <b>01 Sep 2026</b>
+              <b>{home.availableFrom ? new Date(home.availableFrom).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Available now'}</b>
               <i />
-              <b>31 Aug 2027</b>
+              <b>{home.minimumLeaseMonths} month minimum lease</b>
             </div>
             <small>Lease start and end dates</small>
           </section>
@@ -343,11 +378,11 @@ export function ManagedHomeDetails({
           <div>
             <span>
               <small>Maintenance for this home</small>
-              <h2>1 active request</h2>
+              <h2>{home._count.maintenanceRequests} active {home._count.maintenanceRequests === 1 ? 'request' : 'requests'}</h2>
               <p>Tenant-reported issues appear here for the property team.</p>
             </span>
-            <Status tone="gold">
-              <Wrench size={12} /> Repair in progress
+            <Status tone={home._count.maintenanceRequests ? 'gold' : 'slate'}>
+              <Wrench size={12} /> {home._count.maintenanceRequests ? 'Needs attention' : 'No open issues'}
             </Status>
           </div>
           <article>
@@ -355,10 +390,10 @@ export function ManagedHomeDetails({
               <Wrench size={16} />
             </i>
             <span>
-              <b>Bathroom shower pressure</b>
-              <small>Reported by Adaeze Okafor · Medium priority · Updated today</small>
+              <b>{home._count.maintenanceRequests ? 'Maintenance requests available' : 'No maintenance requests for this home'}</b>
+              <small>Tenant-reported issues are shown here when they are submitted.</small>
             </span>
-            <Button variant="outline" onClick={() => go(views.maintenance)}>
+            <Button variant="outline" onClick={() => go(views.maintenance, { listing: home.id })}>
               View maintenance <ArrowRight size={13} />
             </Button>
           </article>
@@ -375,15 +410,39 @@ export function PropertyMaintenance({
   go: Go;
   manager: Manager;
 }) {
-  const [status, setStatus] = useState<'received' | 'in-progress' | 'resolved'>('in-progress');
   const copy = managerCopy(manager);
   const views = managerViews(manager);
-  const statusLabel =
-    status === 'received'
-      ? 'Received'
-      : status === 'in-progress'
-        ? 'Repair in progress'
-        : 'Resolved';
+  const searchParams = useSearchParams();
+  const listingId = searchParams.get('listing');
+  const [requests, setRequests] = useState<ApiMaintenanceRequest[]>([]);
+  const [loading, setLoading] = useState(Boolean(listingId));
+  const [error, setError] = useState<string | null>(listingId ? null : 'Select a home to view its maintenance requests.');
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  useEffect(() => {
+    const session = sessionStore.get();
+    if (!listingId || !session) {
+      if (!session) setError('Sign in to view maintenance requests.');
+      return;
+    }
+    api.maintenance.list(session.accessToken, listingId)
+      .then((response) => setRequests(response.items))
+      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'Unable to load maintenance requests.'))
+      .finally(() => setLoading(false));
+  }, [listingId]);
+  const advance = async (request: ApiMaintenanceRequest) => {
+    const session = sessionStore.get();
+    const next = request.status === 'OPEN' ? 'ACKNOWLEDGED' : request.status === 'ACKNOWLEDGED' ? 'IN_PROGRESS' : request.status === 'IN_PROGRESS' ? 'RESOLVED' : undefined;
+    if (!session || !next) return;
+    setUpdatingId(request.id);
+    try {
+      const updated = await api.maintenance.update(session.accessToken, request.id, { status: next, body: `Status changed to ${next.toLowerCase().replace('_', ' ')}.` });
+      setRequests((current) => current.map((item) => item.id === updated.id ? updated : item));
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : 'Unable to update this request.');
+    } finally {
+      setUpdatingId(null);
+    }
+  };
 
   return (
     <Shell go={go} role={manager} title="Property maintenance">
@@ -398,82 +457,37 @@ export function PropertyMaintenance({
             <p>Review, assign and resolve issues reported by the tenant.</p>
           </span>
           <Status tone="blue">
-            <Building2 size={11} /> Light-filled 2 bedroom
+            <Building2 size={11} /> {requests[0]?.listing.title ?? 'Selected home'}
           </Status>
         </div>
 
         <div className="manager-maintenance-grid">
           <section className="panel incoming-issue">
-            <div className="issue-header">
-              <span>
-                <Status tone={status === 'resolved' ? 'green' : 'gold'}>
-                  {status === 'resolved' ? <Check size={11} /> : <Wrench size={11} />}
-                  {statusLabel}
-                </Status>
-                <h2>Bathroom shower pressure</h2>
-                <p>Reported by Adaeze Okafor · 08 Sep, 9:14 AM</p>
-              </span>
-              <Status tone="gold">
-                <CircleAlert size={11} /> Medium priority
-              </Status>
-            </div>
-            <p className="issue-description">
-              The shower pressure has been very low since yesterday evening. The kitchen tap is working normally. I am available for a technician visit after 10 AM.
-            </p>
-            <div className="issue-activity">
-              <span className="done">
-                <i><Check size={12} /></i>
-                <b>Tenant request received<small>08 Sep · 9:14 AM</small></b>
-              </span>
-              <span className={status !== 'received' ? 'done' : ''}>
-                <i>{status !== 'received' && <Check size={12} />}</i>
-                <b>Plumber assigned<small>{status !== 'received' ? '08 Sep · 12:02 PM' : 'Assign a repair professional'}</small></b>
-              </span>
-              <span className={status === 'in-progress' || status === 'resolved' ? 'now' : ''}>
-                <i>{(status === 'in-progress' || status === 'resolved') && <Wrench size={12} />}</i>
-                <b>Repair work<small>{status === 'resolved' ? 'Repair completed' : 'Expected completion: 12 Sep'}</small></b>
-              </span>
-              <span className={status === 'resolved' ? 'done' : ''}>
-                <i>{status === 'resolved' && <Check size={12} />}</i>
-                <b>Tenant confirmation<small>{status === 'resolved' ? 'Tenant has been notified' : 'Pending repair completion'}</small></b>
-              </span>
-            </div>
-            <div className="issue-actions">
-              <Button variant="outline">
-                <MessageCircle size={14} /> Message tenant
-              </Button>
-              {status === 'received' ? (
-                <Button onClick={() => setStatus('in-progress')}>
-                  Assign repair <ArrowRight size={14} />
-                </Button>
-              ) : status === 'in-progress' ? (
-                <Button onClick={() => setStatus('resolved')}>
-                  Mark resolved <Check size={14} />
-                </Button>
-              ) : (
-                <Button variant="outline" onClick={() => setStatus('in-progress')}>
-                  Reopen case
-                </Button>
-              )}
-            </div>
+            {loading ? <div className="portfolio-empty">Loading maintenance requests…</div> : error ? <div className="portfolio-empty">{error}</div> : requests.length ? requests.map((request) => (
+              <article className="maintenance-live-card" key={request.id}>
+                <div className="issue-header"><span><Status tone={request.status === 'RESOLVED' || request.status === 'CLOSED' ? 'green' : 'gold'}>{request.status.toLowerCase().replace('_', ' ')}</Status><h2>{request.title}</h2><p>Reported by {request.reporter.firstName} {request.reporter.lastName} · {new Date(request.createdAt).toLocaleDateString('en-NG')}</p></span><Status tone="gold"><CircleAlert size={11} /> {request.priority.toLowerCase()}</Status></div>
+                <p className="issue-description">{request.description}</p>
+                <div className="issue-actions"><Button variant="outline" onClick={() => go('assistant')}><MessageCircle size={14} /> Message tenant</Button>{!['RESOLVED', 'CLOSED'].includes(request.status) && <Button onClick={() => void advance(request)} disabled={updatingId === request.id}>{updatingId === request.id ? 'Updating…' : request.status === 'IN_PROGRESS' ? 'Mark resolved' : 'Advance request'} <ArrowRight size={14} /></Button>}</div>
+              </article>
+            )) : <div className="portfolio-empty">There are no maintenance requests for this home.</div>}
           </section>
 
           <aside className="property-maintenance-side">
             <section className="panel">
               <small>Property</small>
-              <h3>Light-filled 2 bedroom</h3>
-              <p><MapPin size={12} /> Lekki Phase 1, Lagos</p>
-              <Button variant="outline" onClick={() => go(views.home)}>
+              <h3>{requests[0]?.listing.title ?? 'Selected home'}</h3>
+              <p><MapPin size={12} /> Live request information is shown here.</p>
+              <Button variant="outline" onClick={() => listingId && go(views.home, { listing: listingId })}>
                 Home details
               </Button>
             </section>
             <section className="panel">
               <small>Request owner</small>
               <div className="maintenance-contact">
-                <i>AO</i>
+                <i>{requests[0] ? `${requests[0].reporter.firstName.charAt(0)}${requests[0].reporter.lastName.charAt(0)}` : '—'}</i>
                 <span>
-                  <b>Adaeze Okafor</b>
-                  <small>Verified tenant</small>
+                  <b>{requests[0] ? `${requests[0].reporter.firstName} ${requests[0].reporter.lastName}` : 'No request owner yet'}</b>
+                  <small>Tenant contact is shown for active requests.</small>
                 </span>
               </div>
               <p>Tenant receives status updates whenever this case changes.</p>

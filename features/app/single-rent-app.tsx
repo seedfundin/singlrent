@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -28,6 +28,7 @@ import {
   KeyRound,
   Landmark,
   LayoutDashboard,
+  LogOut,
   Map,
   MapPin,
   MessageCircle,
@@ -59,7 +60,7 @@ import {
 import { calculateRentalCheckout, formatNaira } from "@/lib/pricing";
 import { viewPaths, type View } from "@/lib/routes";
 import type { AccountRole } from "@/lib/account";
-import { api, registrationDraftStore, sessionStore, type ApiSession } from "@/lib/api";
+import { api, registrationDraftStore, sessionStore, type ApiListing, type ApiSession } from "@/lib/api";
 import { AdminManagement, Permissions } from "@/features/admin/management";
 import {
   AgentWorkspace,
@@ -138,56 +139,153 @@ function Back({ go, to = "home" }: { go: (v: View) => void; to?: View }) {
     </button>
   );
 }
+
+type AppSessionContext = {
+  session: ApiSession | null;
+  signOut: () => Promise<void>;
+};
+
+const AppSession = createContext<AppSessionContext>({
+  session: null,
+  signOut: async () => undefined,
+});
+
+export function useAppSession() {
+  return useContext(AppSession);
+}
+
+function nairaFromKobo(value: string | number) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount / 100 : 0;
+}
+
+function listingImage(listing: ApiListing) {
+  return listing.images[0]?.url;
+}
+
+function listingLocation(listing: ApiListing) {
+  return `${listing.area}, ${listing.state}`;
+}
+
+function ListingPhoto({ listing, className }: { listing: ApiListing; className?: string }) {
+  const image = listingImage(listing);
+  if (image) {
+    return <img className={className ?? "img"} src={image} alt={listing.images[0]?.altText ?? listing.title} />;
+  }
+  return (
+    <div className={`${className ?? "img"} listing-photo-empty`} aria-label="No property photo uploaded">
+      <House size={28} />
+      <small>Photo coming soon</small>
+    </div>
+  );
+}
+
 function Card({
   go,
-  src = photos.living,
-  title = "Light-filled 2 bedroom apartment",
-  area = "Lekki Phase 1, Lagos",
-  price = "₦4,800,000 / year",
+  listing,
   short = false,
+  initiallySaved = false,
 }: {
   go: (v: View) => void;
-  src?: string;
-  title?: string;
-  area?: string;
-  price?: string;
+  listing: ApiListing;
   short?: boolean;
+  initiallySaved?: boolean;
 }) {
+  const router = useRouter();
+  const { session } = useAppSession();
+  const [saved, setSaved] = useState(initiallySaved);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const openListing = () => router.push(`${viewPaths.listing}?listing=${encodeURIComponent(listing.id)}`);
+  const toggleSave = async () => {
+    if (!session) {
+      go("sign-in");
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+    try {
+      if (saved) await api.listings.unsave(session.accessToken, listing.id);
+      else await api.listings.save(session.accessToken, listing.id);
+      setSaved(!saved);
+    } catch (cause: unknown) {
+      setSaveError(cause instanceof Error ? cause.message : "Unable to update saved homes.");
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <article className="property-card">
       <div className="property-pic">
-        <Img src={src} alt={title} />
+        <ListingPhoto listing={listing} />
         <Status>
           <BadgeCheck size={12} />
           Verified
         </Status>
-        <button className="save">
-          <Heart size={15} />
+        <button className="save" onClick={toggleSave} disabled={saving} aria-label={saved ? `Remove ${listing.title} from saved homes` : `Save ${listing.title}`}>
+          <Heart size={15} fill={saved ? "currentColor" : "none"} />
         </button>
       </div>
       <div className="property-text">
-        <b>{price}</b>
-        <h3>{title}</h3>
+        <b>{formatNaira(nairaFromKobo(listing.annualRentKobo))} / year</b>
+        <h3>{listing.title}</h3>
         <p>
           <MapPin size={13} />
-          {area}
+          {listingLocation(listing)}
         </p>
         <div className="spec">
           <span>
-            <BedDouble size={14} />2 beds
+            <BedDouble size={14} />{listing.bedrooms} {listing.bedrooms === 1 ? "bed" : "beds"}
           </span>
           <span>
-            <Bath size={14} />2 baths
+            <Bath size={14} />{listing.bathrooms} {listing.bathrooms === 1 ? "bath" : "baths"}
           </span>
-          <span>Serviced</span>
+          <span>{listing.propertyType.toLowerCase()}</span>
         </div>
+        {saveError && <small className="listing-card-error">{saveError}</small>}
         {!short && (
-          <Button variant="outline" onClick={() => go("listing")}>
+          <Button variant="outline" onClick={openListing}>
             View home <ArrowRight size={14} />
           </Button>
         )}
       </div>
     </article>
+  );
+}
+
+function LiveListings({
+  go,
+  limit = 3,
+  compact = false,
+  className = "cards",
+}: {
+  go: (v: View) => void;
+  limit?: number;
+  compact?: boolean;
+  className?: string;
+}) {
+  const [listings, setListings] = useState<ApiListing[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let active = true;
+    api.listings.search({ pageSize: limit })
+      .then((response) => active && setListings(response.items))
+      .catch((cause: unknown) => active && setError(cause instanceof Error ? cause.message : "Unable to load homes."))
+      .finally(() => active && setLoading(false));
+    return () => { active = false; };
+  }, [limit]);
+  if (loading) return <div className="listing-state"><Clock3 size={17} /> Loading verified homes…</div>;
+  if (error) return <div className="listing-state error"><CircleAlert size={17} /> {error}</div>;
+  if (!listings.length) return <div className="listing-state"><House size={17} /> No verified homes are available yet.</div>;
+  return (
+    <div className={className}>
+      {listings.map((listing) => (
+        <motion.div key={listing.id} whileHover={{ y: -6 }} transition={{ duration: 0.2 }}>
+          <Card go={go} listing={listing} short={compact} />
+        </motion.div>
+      ))}
+    </div>
   );
 }
 function Metric({
@@ -233,6 +331,13 @@ function Metric({
   );
 }
 function Header({ go }: { go: (v: View) => void }) {
+  const { session, signOut } = useAppSession();
+  const destinationFor = (current: ApiSession): View => {
+    if (current.user.roles.includes("SUPER_ADMIN") || current.user.roles.includes("ADMIN")) return "admin";
+    if (current.user.roles.includes("LANDLORD")) return "landlord";
+    if (current.user.roles.includes("AGENT")) return "agent";
+    return "tenant";
+  };
   return (
     <header className="head">
       <Brand go={go} />
@@ -241,12 +346,21 @@ function Header({ go }: { go: (v: View) => void }) {
         <button onClick={() => go("home")}>How it works</button>
         <button onClick={() => go("sign-up")}>For landlords</button>
       </nav>
-      <div>
-        <Button variant="ghost" onClick={() => go("sign-in")}>
-          Sign in
-        </Button>
-        <Button onClick={() => go("sign-up")}>Create account</Button>
-      </div>
+      {session ? (
+        <div>
+          <Button variant="ghost" onClick={() => go(destinationFor(session))}>
+            <UserRound size={15} /> {session.user.firstName}
+          </Button>
+          <Button variant="outline" onClick={() => void signOut()}>
+            <LogOut size={14} /> Sign out
+          </Button>
+        </div>
+      ) : (
+        <div>
+          <Button variant="ghost" onClick={() => go("sign-in")}>Sign in</Button>
+          <Button onClick={() => go("sign-up")}>Create account</Button>
+        </div>
+      )}
     </header>
   );
 }
@@ -261,6 +375,11 @@ export function Shell({
   title: string;
   children: ReactNode;
 }) {
+  const { session, signOut } = useAppSession();
+  const displayName = session ? `${session.user.firstName} ${session.user.lastName}`.trim() : "Guest";
+  const initials = session
+    ? `${session.user.firstName.charAt(0)}${session.user.lastName.charAt(0)}`.toUpperCase()
+    : "SR";
   const items =
     role === "tenant"
       ? [
@@ -314,25 +433,21 @@ export function Shell({
           ))}
         </nav>
         <div className="side-bottom">
-          <button>
+          <button onClick={() => go("notifications")}>
             <Settings size={17} />
             Settings
           </button>
           <div className="profile">
-            <i>{role === "landlord" ? "JO" : role === "agent" ? "TO" : role === "admin" ? "AO" : "AO"}</i>
+            <i>{initials}</i>
             <span>
-              <b>
-                {role === "landlord"
-                  ? "Jide Ojo"
-                  : role === "agent"
-                    ? "Tolu Adeyemi"
-                  : role === "admin"
-                    ? "Amina Okoro"
-                    : "Adaeze Okafor"}
-              </b>
-              <small>{role}</small>
+              <b>{displayName}</b>
+              <small>{session ? role : "not signed in"}</small>
             </span>
-            <MoreHorizontal size={15} />
+            {session ? (
+              <button className="profile-signout" onClick={() => void signOut()} aria-label="Sign out">
+                <LogOut size={15} />
+              </button>
+            ) : <MoreHorizontal size={15} />}
           </div>
         </div>
       </aside>
@@ -421,7 +536,7 @@ function Landing({ go }: { go: (v: View) => void }) {
               <span>
                 <MapPin size={18} />
                 <i>
-                  Where are you moving to?<b>Abuja, Ibadan, Enugu...</b>
+                  Where are you moving to?<b>Lagos, Abuja, Ibadan, Enugu...</b>
                 </i>
                 <ChevronDown size={16} />
               </span>
@@ -541,11 +656,7 @@ function Landing({ go }: { go: (v: View) => void }) {
               Explore available spaces <ArrowRight size={14} />
             </Button>
           </div>
-          <div className="cards">
-            <motion.div whileHover={{ y: -6 }} transition={{ duration: 0.2 }}><Card go={go} src={photos.building} title="Private room in a shared 2-bed flat" area="Gwarinpa, Abuja" price="₦850,000 / year" /></motion.div>
-            <motion.div whileHover={{ y: -6 }} transition={{ duration: 0.2 }}><Card go={go} src={photos.suite} title="Self-contained studio near the university" area="Bodija, Ibadan" price="₦1,200,000 / year" /></motion.div>
-            <motion.div whileHover={{ y: -6 }} transition={{ duration: 0.2 }}><Card go={go} title="Compact 1-bedroom close to work" area="New Haven, Enugu" price="₦1,650,000 / year" /></motion.div>
-          </div>
+          <LiveListings go={go} />
         </motion.section>
         <motion.section
           className="how"
@@ -648,6 +759,31 @@ function Landing({ go }: { go: (v: View) => void }) {
 }
 function Explore({ go }: { go: (v: View) => void }) {
   const [map, setMap] = useState(true);
+  const [areaInput, setAreaInput] = useState("");
+  const [area, setArea] = useState("");
+  const [bedrooms, setBedrooms] = useState("");
+  const [listings, setListings] = useState<ApiListing[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    api.listings.search({ pageSize: 12, area: area || undefined, bedrooms: bedrooms ? Number(bedrooms) : undefined })
+      .then((response) => {
+        if (!active) return;
+        setListings(response.items);
+        setTotal(response.meta.total);
+      })
+      .catch((cause: unknown) => active && setError(cause instanceof Error ? cause.message : "Unable to load homes."))
+      .finally(() => active && setLoading(false));
+    return () => { active = false; };
+  }, [area, bedrooms]);
+  const search = (event: React.FormEvent) => {
+    event.preventDefault();
+    setArea(areaInput.trim());
+  };
   return (
     <>
       <Header go={go} />
@@ -655,31 +791,27 @@ function Explore({ go }: { go: (v: View) => void }) {
         <div className="top">
           <span>
             <small>Explore homes</small>
-            <h1>Homes in Lekki, Lagos</h1>
-            <p>127 verified homes available now</p>
+            <h1>Find your next space</h1>
+            <p>{loading ? "Searching verified homes…" : `${total} verified ${total === 1 ? "home" : "homes"} available now`}</p>
           </span>
           <Button variant="outline" onClick={() => go("home")}>
             <ArrowLeft size={14} />
             Back home
           </Button>
         </div>
-        <div className="filters">
-          <button>
+        <form className="filters" onSubmit={search}>
+          <label className="listing-filter-field">
             <MapPin size={15} />
-            Lekki, Lagos <ChevronDown size={14} />
-          </button>
-          <button>
-            ₦1m – ₦8m <ChevronDown size={14} />
-          </button>
-          <button>
-            Any type <ChevronDown size={14} />
-          </button>
-          <button>
-            Bedrooms <ChevronDown size={14} />
-          </button>
-          <button>
-            More filters <SlidersHorizontal size={14} />
-          </button>
+            <input value={areaInput} onChange={(event) => setAreaInput(event.target.value)} placeholder="Search city or area" aria-label="Search by city or area" />
+          </label>
+          <label className="listing-filter-field">
+            <BedDouble size={15} />
+            <select value={bedrooms} onChange={(event) => setBedrooms(event.target.value)} aria-label="Number of bedrooms">
+              <option value="">Any bedrooms</option>
+              {[0, 1, 2, 3, 4].map((count) => <option key={count} value={count}>{count === 0 ? "Studio" : `${count} ${count === 1 ? "bedroom" : "bedrooms"}`}</option>)}
+            </select>
+          </label>
+          <Button type="submit" size="sm"><Search size={14} /> Search</Button>
           <span>
             <button className={!map ? "on" : ""} onClick={() => setMap(false)}>
               <Grid2X2 size={14} />
@@ -690,52 +822,31 @@ function Explore({ go }: { go: (v: View) => void }) {
               Map
             </button>
           </span>
-        </div>
+        </form>
         <div className="search-layout">
           <section>
             <p className="sort">
-              Sort: <b>Recommended</b>
-              <ChevronDown size={13} />
-              <i>Verified listings ×</i>
+              <b>Verified listings</b>
+              {area && <i>{area} ×</i>}
             </p>
-            <div className="results">
-              <Card go={go} />
-              <Card
-                go={go}
-                src={photos.suite}
-                title="Calm 3 bedroom in Ikoyi"
-                price="₦8,500,000 / year"
-              />
-              <Card
-                go={go}
-                src={photos.building}
-                title="Bright studio flat"
-                price="₦1,850,000 / year"
-              />
-              <Card
-                go={go}
-                title="2 bed with resident gym"
-                area="Chevron, Lekki"
-                price="₦3,900,000 / year"
-              />
-            </div>
+            {loading ? <div className="listing-state"><Clock3 size={17} /> Loading verified homes…</div> : error ? <div className="listing-state error"><CircleAlert size={17} /> {error}</div> : listings.length ? (
+              <div className="results">{listings.map((listing) => <Card key={listing.id} go={go} listing={listing} />)}</div>
+            ) : <div className="listing-state"><House size={17} /> No verified homes match this search yet.</div>}
           </section>
-          {map && (
+          {map && listings.length > 0 && (
             <aside className="map">
               <div className="road r1" />
               <div className="road r2" />
-              <b className="pin a">₦4.8m</b>
-              <b className="pin b">₦3.9m</b>
-              <b className="pin c">₦1.85m</b>
+              {listings.slice(0, 3).map((listing, index) => <b className={`pin ${["a", "b", "c"][index]}`} key={listing.id}>{formatNaira(nairaFromKobo(listing.annualRentKobo))}</b>)}
               <div className="map-card">
-                <Img />
+                <ListingPhoto listing={listings[0]} />
                 <span>
                   <Status>
                     <BadgeCheck size={11} />
                     Verified
                   </Status>
-                  <b>2 bed apartment</b>
-                  <small>₦4,800,000 / yr</small>
+                  <b>{listings[0].title}</b>
+                  <small>{formatNaira(nairaFromKobo(listings[0].annualRentKobo))} / yr</small>
                 </span>
               </div>
             </aside>
@@ -746,6 +857,42 @@ function Explore({ go }: { go: (v: View) => void }) {
   );
 }
 function Listing({ go, gate }: { go: (v: View) => void; gate: () => void }) {
+  const searchParams = useSearchParams();
+  const listingId = searchParams.get("listing");
+  const { session } = useAppSession();
+  const [listing, setListing] = useState<ApiListing | null>(null);
+  const [loading, setLoading] = useState(Boolean(listingId));
+  const [error, setError] = useState<string | null>(listingId ? null : "Choose a verified home from Explore homes to view its details.");
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!listingId) return;
+    let active = true;
+    setLoading(true);
+    setError(null);
+    api.listings.detail(listingId)
+      .then((response) => active && setListing(response))
+      .catch((cause: unknown) => active && setError(cause instanceof Error ? cause.message : "Unable to load this home."))
+      .finally(() => active && setLoading(false));
+    return () => { active = false; };
+  }, [listingId]);
+  const toggleSave = async () => {
+    if (!listing) return;
+    if (!session) {
+      go("sign-in");
+      return;
+    }
+    setSaving(true);
+    try {
+      if (saved) await api.listings.unsave(session.accessToken, listing.id);
+      else await api.listings.save(session.accessToken, listing.id);
+      setSaved(!saved);
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : "Unable to update saved homes.");
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <>
       <Header go={go} />
@@ -761,127 +908,59 @@ function Listing({ go, gate }: { go: (v: View) => void; gate: () => void }) {
             </Button>
           </span>
         </div>
-        <section className="gallery">
-          <div>
-            <Img />
-            <button>
-              <Grid2X2 size={14} />
-              View all 18 photos
-            </button>
-          </div>
-          <div>
-            <Img src={photos.building} />
-            <span>
-              <Img src={photos.suite} />
-              <button>
-                <Video size={14} />
-                Watch walkthrough
-              </button>
-            </span>
-          </div>
-        </section>
-        <div className="detail-layout">
-          <article>
-            <div className="title">
-              <span>
-                <Status>
-                  <BadgeCheck size={12} />
-                  Verified home
-                </Status>
-                <h1>Light-filled 2 bedroom apartment</h1>
-                <p>
-                  <MapPin size={15} />
-                  Admiralty Way, Lekki Phase 1, Lagos
-                </p>
-              </span>
-              <button>
-                <Heart size={18} />
-              </button>
-            </div>
-            <div className="facts">
-              <span>
-                <BedDouble />
-                <b>
-                  2<small>Bedrooms</small>
-                </b>
-              </span>
-              <span>
-                <Bath />
-                <b>
-                  2<small>Bathrooms</small>
-                </b>
-              </span>
-              <span>
-                <House />
-                <b>
-                  Apartment<small>Serviced</small>
-                </b>
-              </span>
-              <span>
-                <CalendarDays />
-                <b>
-                  Now<small>Available</small>
-                </b>
-              </span>
-            </div>
-            <h2>About this home</h2>
-            <p className="bodycopy">
-              Thoughtfully finished 2-bedroom apartment in a quiet, secure part
-              of Lekki Phase 1. The home has an open living area, ensuite rooms
-              and a fitted kitchen. Residents enjoy 24/7 power backup, treated
-              water and on-site security.
-            </p>
-            <h2>What this home offers</h2>
-            <div className="amenities">
-              {[
-                "24/7 power backup",
-                "Treated water",
-                "Secure parking",
-                "Fitted kitchen",
-                "Air conditioning",
-                "CCTV security",
-              ].map((x) => (
-                <span key={x}>
-                  <CircleCheck size={15} />
-                  {x}
+        {loading ? <div className="listing-state"><Clock3 size={17} /> Loading this verified home…</div> : error ? <div className="listing-state error"><CircleAlert size={17} /> {error}</div> : listing && (
+          <>
+            <section className="gallery">
+              <div>
+                <ListingPhoto listing={listing} />
+                <button><Grid2X2 size={14} /> View all {listing.images.length} photos</button>
+              </div>
+              <div>
+                {listing.images[1] ? <img className="img" src={listing.images[1].url} alt={listing.images[1].altText ?? listing.title} /> : <ListingPhoto listing={listing} />}
+                <span>
+                  {listing.images[2] ? <img className="img" src={listing.images[2].url} alt={listing.images[2].altText ?? listing.title} /> : <ListingPhoto listing={listing} />}
+                  <button><Video size={14} /> Property photos</button>
                 </span>
-              ))}
+              </div>
+            </section>
+            <div className="detail-layout">
+              <article>
+                <div className="title">
+                  <span>
+                    <Status><BadgeCheck size={12} /> Verified home</Status>
+                    <h1>{listing.title}</h1>
+                    <p><MapPin size={15} /> {listing.address}, {listingLocation(listing)}</p>
+                  </span>
+                  <button onClick={toggleSave} disabled={saving} aria-label={saved ? "Remove from saved homes" : "Save home"}><Heart size={18} fill={saved ? "currentColor" : "none"} /></button>
+                </div>
+                <div className="facts">
+                  <span><BedDouble /><b>{listing.bedrooms}<small>Bedrooms</small></b></span>
+                  <span><Bath /><b>{listing.bathrooms}<small>Bathrooms</small></b></span>
+                  <span><House /><b>{listing.propertyType.toLowerCase()}<small>Property type</small></b></span>
+                  <span><CalendarDays /><b>{listing.availability === "AVAILABLE" ? "Now" : listing.availability.toLowerCase()}<small>Availability</small></b></span>
+                </div>
+                <h2>About this home</h2>
+                <p className="bodycopy">{listing.description}</p>
+                <h2>What this home offers</h2>
+                {listing.amenities.length ? <div className="amenities">{listing.amenities.map((amenity) => <span key={amenity}><CircleCheck size={15} /> {amenity}</span>)}</div> : <p className="bodycopy">The landlord has not added amenities yet.</p>}
+                <div className="host">
+                  <i>{`${listing.landlord.firstName.charAt(0)}${listing.landlord.lastName.charAt(0)}`}</i>
+                  <span><small>Listed by</small><b>{listing.landlord.firstName} {listing.landlord.lastName}</b><small>{listing.source === "AGENT" ? "Managed by an agent" : "Direct landlord listing"}</small></span>
+                  <Button variant="outline" onClick={gate}><MessageCircle size={14} /> Ask landlord</Button>
+                </div>
+              </article>
+              <aside className="rent">
+                <b>{formatNaira(nairaFromKobo(listing.annualRentKobo))} <small>/ year</small></b>
+                <p>{formatNaira(nairaFromKobo(listing.annualRentKobo) / 12)} monthly equivalent</p>
+                <hr />
+                <span>Property is available <Status tone={listing.availability === "AVAILABLE" ? "green" : "slate"}>{listing.availability.toLowerCase()}</Status></span>
+                <Button onClick={() => go("apply")} disabled={listing.availability !== "AVAILABLE"}>Rent this home <ArrowRight size={15} /></Button>
+                <Button variant="outline" onClick={gate}><Sparkles size={15} /> Ask Property AI</Button>
+                <small><ShieldCheck size={14} /> Secure rent payment held in escrow</small>
+              </aside>
             </div>
-            <div className="host">
-              <i>JO</i>
-              <span>
-                <small>Listed by</small>
-                <b>Jide Ojo</b>
-                <small>Verified landlord · 6 homes</small>
-              </span>
-              <Button variant="outline" onClick={gate}>
-                <MessageCircle size={14} />
-                Ask landlord
-              </Button>
-            </div>
-          </article>
-          <aside className="rent">
-            <b>
-              ₦4,800,000 <small>/ year</small>
-            </b>
-            <p>₦400,000 monthly equivalent</p>
-            <hr />
-            <span>
-              Property is available <Status>Ready to rent</Status>
-            </span>
-            <Button onClick={() => go("apply")}>
-              Rent this home <ArrowRight size={15} />
-            </Button>
-            <Button variant="outline" onClick={gate}>
-              <Sparkles size={15} />
-              Ask Property AI
-            </Button>
-            <small>
-              <ShieldCheck size={14} />
-              Secure rent payment held in escrow
-            </small>
-          </aside>
-        </div>
+          </>
+        )}
       </div>
     </>
   );
@@ -1558,16 +1637,7 @@ function Tenant({ go }: { go: (v: View) => void }) {
             See all <ArrowRight size={14} />
           </Button>
         </div>
-        <div className="cards two">
-          <Card go={go} short />
-          <Card
-            go={go}
-            short
-            src={photos.suite}
-            title="Quiet 3 bed in Ikoyi"
-            price="₦8,500,000 / year"
-          />
-        </div>
+        <LiveListings go={go} limit={2} compact className="cards two" />
         <div className="panel latest">
           <i>JO</i>
           <span>
@@ -2701,6 +2771,24 @@ export function SingleRentApp({ initialView }: { initialView: View }) {
   const searchParams = useSearchParams();
   const [accountRole, setAccountRole] = useState<AccountRole>("tenant");
   const [gate, setGate] = useState(false);
+  const [session, setSession] = useState<ApiSession | null>(null);
+  useEffect(() => {
+    const stored = sessionStore.get();
+    if (!stored) return;
+    setSession(stored);
+    api.auth.me(stored.accessToken)
+      .then((user) => {
+        const refreshed = { ...stored, user };
+        sessionStore.set(refreshed);
+        setSession(refreshed);
+      })
+      .catch((cause: unknown) => {
+        if (typeof cause === "object" && cause !== null && "status" in cause && (cause as { status?: number }).status === 401) {
+          sessionStore.clear();
+          setSession(null);
+        }
+      });
+  }, []);
   const requestedRole = searchParams.get("role");
   const kycRole: AccountRole =
     requestedRole === "tenant" ||
@@ -2708,8 +2796,10 @@ export function SingleRentApp({ initialView }: { initialView: View }) {
     requestedRole === "landlord"
       ? requestedRole
       : accountRole;
-  const go = (v: View) => {
-    router.push(viewPaths[v]);
+  const go = (v: View, query?: Record<string, string>) => {
+    const path = viewPaths[v];
+    const parameters = query ? new URLSearchParams(query).toString() : "";
+    router.push(parameters ? `${path}?${parameters}` : path);
   };
   const destinationFor = (session: ApiSession): View => {
     if (session.user.roles.includes('SUPER_ADMIN') || session.user.roles.includes('ADMIN')) return 'admin';
@@ -2718,7 +2808,21 @@ export function SingleRentApp({ initialView }: { initialView: View }) {
     return 'tenant';
   };
   const handleAuthenticated = (session: ApiSession) => {
+    setSession(session);
     router.push(viewPaths[destinationFor(session)]);
+  };
+  const signOut = async () => {
+    const activeSession = session;
+    sessionStore.clear();
+    setSession(null);
+    router.push(viewPaths.home);
+    if (activeSession) {
+      try {
+        await api.auth.logout(activeSession.accessToken, activeSession.refreshToken);
+      } catch {
+        // Local session is cleared even when the API is temporarily unavailable.
+      }
+    }
   };
   const registerWithRole = async (role: AccountRole): Promise<void> => {
     const draft = registrationDraftStore.get();
@@ -2730,6 +2834,7 @@ export function SingleRentApp({ initialView }: { initialView: View }) {
     const session = await api.auth.register({ ...draft, role: roleCode });
     registrationDraftStore.clear();
     sessionStore.set(session);
+    setSession(session);
     setAccountRole(role);
     router.push(`${viewPaths.kyc}?role=${role}`);
   };
@@ -2776,6 +2881,7 @@ export function SingleRentApp({ initialView }: { initialView: View }) {
     adminops: <OperationsAdmin go={go} />,
   };
   return (
+    <AppSession.Provider value={{ session, signOut }}>
     <div className="min-h-screen bg-white">
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
@@ -2822,5 +2928,6 @@ export function SingleRentApp({ initialView }: { initialView: View }) {
         </DialogContent>
       </Dialog>
     </div>
+    </AppSession.Provider>
   );
 }

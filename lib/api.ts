@@ -20,6 +20,68 @@ export type NinVerificationResult = {
   superseded?: boolean;
 };
 
+export type ApiListingImage = {
+  id: string;
+  url: string;
+  altText: string | null;
+  position: number;
+};
+
+export type ApiListing = {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  propertyType: 'APARTMENT' | 'HOUSE' | 'DUPLEX' | 'STUDIO' | 'ROOM' | 'OTHER';
+  source: 'LANDLORD' | 'AGENT';
+  status: 'DRAFT' | 'PENDING_REVIEW' | 'PUBLISHED' | 'REJECTED' | 'SUSPENDED' | 'ARCHIVED';
+  availability: 'AVAILABLE' | 'RENTED' | 'UNAVAILABLE';
+  annualRentKobo: string;
+  serviceChargeKobo: string;
+  cautionFeeKobo: string;
+  bedrooms: number;
+  bathrooms: number;
+  state: string;
+  area: string;
+  address: string;
+  amenities: string[];
+  availableFrom: string | null;
+  minimumLeaseMonths: number;
+  images: ApiListingImage[];
+  landlord: { id: string; firstName: string; lastName: string; profileImageUrl: string | null };
+  managingAgent: { id: string; firstName: string; lastName: string; profileImageUrl: string | null } | null;
+  _count: { savedBy: number; applications: number; maintenanceRequests: number };
+};
+
+export type PaginatedResponse<T> = {
+  items: T[];
+  meta: { page: number; pageSize: number; total: number; totalPages: number };
+};
+
+export type ListingQuery = {
+  page?: number;
+  pageSize?: number;
+  state?: string;
+  area?: string;
+  bedrooms?: number;
+  propertyType?: ApiListing['propertyType'];
+};
+
+export type ApiMaintenanceRequest = {
+  id: string;
+  listingId: string;
+  title: string;
+  description: string;
+  category: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+  status: 'OPEN' | 'ACKNOWLEDGED' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+  createdAt: string;
+  updatedAt: string;
+  listing: { id: string; slug: string; title: string };
+  reporter: { id: string; firstName: string; lastName: string };
+  updates: { id: string; body: string | null; fromStatus: string | null; toStatus: string | null; createdAt: string; author: { id: string; firstName: string; lastName: string } }[];
+};
+
 type ApiErrorResponse = { message?: string | string[] };
 
 export class ApiError extends Error {
@@ -62,6 +124,15 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
     throw new ApiError(message ?? 'Something went wrong. Please try again.', response.status);
   }
   return payload as T;
+}
+
+function queryString(query: ListingQuery = {}): string {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  });
+  const value = params.toString();
+  return value ? `?${value}` : '';
 }
 
 export const sessionStore = {
@@ -116,6 +187,38 @@ export const api = {
     },
     me(token: string): Promise<ApiSession['user']> {
       return request<ApiSession['user']>('/auth/me', {}, token);
+    },
+    logout(token: string, refreshToken: string): Promise<void> {
+      return request<void>('/auth/logout', { method: 'POST', body: JSON.stringify({ refreshToken }) }, token);
+    },
+  },
+  listings: {
+    search(query?: ListingQuery): Promise<PaginatedResponse<ApiListing>> {
+      return request<PaginatedResponse<ApiListing>>(`/listings${queryString(query)}`);
+    },
+    mine(token: string, query?: ListingQuery): Promise<PaginatedResponse<ApiListing>> {
+      return request<PaginatedResponse<ApiListing>>(`/listings/mine${queryString(query)}`, {}, token);
+    },
+    saved(token: string, query?: ListingQuery): Promise<PaginatedResponse<ApiListing>> {
+      return request<PaginatedResponse<ApiListing>>(`/listings/saved${queryString(query)}`, {}, token);
+    },
+    detail(idOrSlug: string): Promise<ApiListing> {
+      return request<ApiListing>(`/listings/${encodeURIComponent(idOrSlug)}`);
+    },
+    save(token: string, listingId: string): Promise<void> {
+      return request<void>(`/listings/${listingId}/save`, { method: 'POST' }, token);
+    },
+    unsave(token: string, listingId: string): Promise<void> {
+      return request<void>(`/listings/${listingId}/save`, { method: 'DELETE' }, token);
+    },
+  },
+  maintenance: {
+    list(token: string, listingId?: string): Promise<PaginatedResponse<ApiMaintenanceRequest>> {
+      const query = listingId ? `?listingId=${encodeURIComponent(listingId)}` : '';
+      return request<PaginatedResponse<ApiMaintenanceRequest>>(`/maintenance${query}`, {}, token);
+    },
+    update(token: string, requestId: string, input: { status?: ApiMaintenanceRequest['status']; body?: string }): Promise<ApiMaintenanceRequest> {
+      return request<ApiMaintenanceRequest>(`/maintenance/${requestId}`, { method: 'PATCH', body: JSON.stringify(input) }, token);
     },
   },
   users: {
