@@ -28,6 +28,11 @@ const environmentSchema = z.object({
   DOJAH_SECRET_KEY: z.string().min(1).optional(),
   GOOGLE_OAUTH_CLIENT_ID: z.string().min(1).optional(),
   GOOGLE_TOKEN_INFO_URL: z.string().url().default('https://oauth2.googleapis.com/tokeninfo'),
+  // Kept server-side so the browser never calls a public OSM Nominatim endpoint.
+  GEOCODING_PROVIDER: z.enum(['geoapify']).default('geoapify'),
+  GEOCODING_API_KEY: z.string().min(1).optional(),
+  GEOCODING_BASE_URL: z.string().url().default('https://api.geoapify.com'),
+  GEOCODING_COUNTRY_CODE: z.string().regex(/^[a-zA-Z]{2}$/).default('ng'),
 });
 
 export type EnvironmentVariables = z.infer<typeof environmentSchema>;

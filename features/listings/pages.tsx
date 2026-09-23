@@ -9,6 +9,15 @@ import { api, type ApiListing } from "@/lib/api";
 import { formatNaira } from "@/lib/pricing";
 import { Back, PublicHeader, Status, type Navigate } from "@/features/app/shell";
 import { ListingCard, ListingPhoto, listingLocation, nairaFromKobo } from "@/features/listings/listing-card";
+import { PropertyLocationMap, type PropertyCoordinates } from "@/features/maps/property-location-map";
+
+function listingCoordinates(listing: ApiListing): PropertyCoordinates | null {
+  const latitude = Number(listing.latitude);
+  const longitude = Number(listing.longitude);
+  return Number.isFinite(latitude) && Number.isFinite(longitude) && latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
+    ? { latitude, longitude }
+    : null;
+}
 
 export function ExploreHomes({ go }: { go: Navigate }) {
   const [map, setMap] = useState(true);
@@ -86,6 +95,7 @@ export function ListingDetails({ go, gate }: { go: Navigate; gate: () => void })
         <div className="detail-layout"><article><div className="title"><span><Status><BadgeCheck size={12} /> Verified home</Status><h1>{listing.title}</h1><p><MapPin size={15} /> {listing.address}, {listingLocation(listing)}</p></span><button onClick={toggleSave} disabled={saving} aria-label={saved ? "Remove from saved homes" : "Save home"}><Heart size={18} fill={saved ? "currentColor" : "none"} /></button></div>
           <div className="facts"><span><BedDouble /><b>{listing.bedrooms}<small>Bedrooms</small></b></span><span><Bath /><b>{listing.bathrooms}<small>Bathrooms</small></b></span><span><House /><b>{listing.propertyType.toLowerCase()}<small>Property type</small></b></span><span><CalendarDays /><b>{listing.availability === "AVAILABLE" ? "Now" : listing.availability.toLowerCase()}<small>Availability</small></b></span></div>
           <h2>About this home</h2><p className="bodycopy">{listing.description}</p><h2>What this home offers</h2>{listing.amenities.length ? <div className="amenities">{listing.amenities.map((amenity) => <span key={amenity}><CircleCheck size={15} /> {amenity}</span>)}</div> : <p className="bodycopy">The landlord has not added amenities yet.</p>}
+          {listingCoordinates(listing) && <section className="tenant-location"><h2>Property location</h2><p className="bodycopy">The map pin is the location selected by the landlord when the listing was created.</p><PropertyLocationMap value={listingCoordinates(listing)} /></section>}
           <div className="host"><i>{`${listing.landlord.firstName.charAt(0)}${listing.landlord.lastName.charAt(0)}`}</i><span><small>Listed by</small><b>{listing.landlord.firstName} {listing.landlord.lastName}</b><small>{listing.source === "AGENT" ? "Managed by an agent" : "Direct landlord listing"}</small></span><Button variant="outline" onClick={gate}><MessageCircle size={14} /> Ask landlord</Button></div>
         </article><aside className="rent"><b>{formatNaira(nairaFromKobo(listing.annualRentKobo))} <small>/ year</small></b><p>{formatNaira(nairaFromKobo(listing.annualRentKobo) / 12)} monthly equivalent</p><hr /><span>Property is available <Status tone={listing.availability === "AVAILABLE" ? "green" : "slate"}>{listing.availability.toLowerCase()}</Status></span><Button onClick={() => go("apply")} disabled={listing.availability !== "AVAILABLE"}>Rent this home <ArrowRight size={15} /></Button><Button variant="outline" onClick={gate}><Sparkles size={15} /> Ask Property AI</Button><small><CircleCheck size={14} /> Secure rent payment held in escrow</small></aside></div>
       </>}

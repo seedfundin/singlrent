@@ -44,6 +44,8 @@ export type ApiListing = {
   state: string;
   area: string;
   address: string;
+  latitude: number | string | null;
+  longitude: number | string | null;
   amenities: string[];
   availableFrom: string | null;
   minimumLeaseMonths: number;
@@ -65,6 +67,32 @@ export type ListingQuery = {
   area?: string;
   bedrooms?: number;
   propertyType?: ApiListing['propertyType'];
+};
+
+export type CreateListingInput = {
+  title: string;
+  description: string;
+  propertyType: ApiListing['propertyType'];
+  annualRentKobo: string;
+  serviceChargeKobo?: string;
+  cautionFeeKobo?: string;
+  bedrooms: number;
+  bathrooms: number;
+  state: string;
+  area: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  amenities?: string[];
+  availableFrom?: string;
+  minimumLeaseMonths?: number;
+};
+
+export type GeocodingSuggestion = {
+  id: string;
+  address: string;
+  latitude: number;
+  longitude: number;
 };
 
 export type ApiMaintenanceRequest = {
@@ -205,11 +233,20 @@ export const api = {
     detail(idOrSlug: string): Promise<ApiListing> {
       return request<ApiListing>(`/listings/${encodeURIComponent(idOrSlug)}`);
     },
+    create(token: string, input: CreateListingInput): Promise<ApiListing> {
+      return request<ApiListing>('/listings', { method: 'POST', body: JSON.stringify(input) }, token);
+    },
     save(token: string, listingId: string): Promise<void> {
       return request<void>(`/listings/${listingId}/save`, { method: 'POST' }, token);
     },
     unsave(token: string, listingId: string): Promise<void> {
       return request<void>(`/listings/${listingId}/save`, { method: 'DELETE' }, token);
+    },
+  },
+  geocoding: {
+    search(token: string, query: string, limit = 5): Promise<GeocodingSuggestion[]> {
+      const params = new URLSearchParams({ q: query, limit: String(limit) });
+      return request<GeocodingSuggestion[]>(`/geocoding/search?${params.toString()}`, {}, token);
     },
   },
   maintenance: {
