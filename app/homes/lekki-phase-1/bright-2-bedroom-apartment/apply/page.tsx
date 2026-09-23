@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { ApplicationPage } from '@/features/rentals/pages';
 
-export default function ApplicationPage() {
-  return <RouteView view="apply" />;
-}
+export default ApplicationPage;

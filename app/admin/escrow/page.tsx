@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { AdminEscrowPage } from '@/features/admin/pages';
 
-export default function EscrowPage() {
-  return <RouteView view="escrow" />;
-}
+export default AdminEscrowPage;

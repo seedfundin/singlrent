@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { HomePage } from '@/features/public/pages';
 
-export default function HomePage() {
-  return <RouteView view="home" />;
-}
+export default HomePage;

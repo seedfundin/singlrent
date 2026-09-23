@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { LandlordQuestionsPage } from '@/features/landlord/pages';
 
-export default function PropertyQuestionsPage() {
-  return <RouteView view="questions" />;
-}
+export default LandlordQuestionsPage;

@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { SavedHomesPage } from '@/features/tenant/pages';
 
-export default function SavedHomesPage() {
-  return <RouteView view="saved-homes" />;
-}
+export default SavedHomesPage;

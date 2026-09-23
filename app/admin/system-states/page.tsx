@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { AdminSystemStatesPage } from '@/features/admin/pages';
 
-export default function SystemStatesPage() {
-  return <RouteView view="states" />;
-}
+export default AdminSystemStatesPage;

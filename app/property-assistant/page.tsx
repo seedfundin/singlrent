@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { PropertyAssistantPage } from '@/features/product/pages';
 
-export default function PropertyAssistantPage() {
-  return <RouteView view="assistant" />;
-}
+export default PropertyAssistantPage;

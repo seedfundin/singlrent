@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { SignUpPage } from '@/features/auth/pages';
 
-export default function SignUpPage() {
-  return <RouteView view="sign-up" />;
-}
+export default SignUpPage;

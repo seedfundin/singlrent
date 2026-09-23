@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { AgentHomesPage } from '@/features/agent/pages';
 
-export default function AgentHomesPage() {
-  return <RouteView view="agent-homes" />;
-}
+export default AgentHomesPage;

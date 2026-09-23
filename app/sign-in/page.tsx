@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { SignInPage } from '@/features/auth/pages';
 
-export default function SignInPage() {
-  return <RouteView view="sign-in" />;
-}
+export default SignInPage;

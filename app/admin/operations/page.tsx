@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { AdminOperationsPage } from '@/features/admin/pages';
 
-export default function OperationsPage() {
-  return <RouteView view="adminops" />;
-}
+export default AdminOperationsPage;

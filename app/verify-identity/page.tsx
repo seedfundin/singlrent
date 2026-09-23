@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { KycPage } from '@/features/auth/pages';
 
-export default function VerifyIdentityPage() {
-  return <RouteView view="kyc" />;
-}
+export default KycPage;

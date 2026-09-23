@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { TenantDashboardPage } from '@/features/tenant/pages';
 
-export default function TenantDashboardPage() {
-  return <RouteView view="tenant" />;
-}
+export default TenantDashboardPage;

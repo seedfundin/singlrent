@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { LandlordMaintenancePage } from '@/features/landlord/pages';
 
-export default function LandlordPropertyMaintenancePage() {
-  return <RouteView view="landlord-maintenance" />;
-}
+export default LandlordMaintenancePage;

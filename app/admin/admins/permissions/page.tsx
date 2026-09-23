@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { AdminPermissionsPage } from '@/features/admin/pages';
 
-export default function PermissionsPage() {
-  return <RouteView view="permissions" />;
-}
+export default AdminPermissionsPage;

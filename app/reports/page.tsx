@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { ReportsPage } from '@/features/product/pages';
 
-export default function ReportsPage() {
-  return <RouteView view="incidents" />;
-}
+export default ReportsPage;

@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { PaymentPage } from '@/features/rentals/pages';
 
-export default function PaymentPage() {
-  return <RouteView view="payment" />;
-}
+export default PaymentPage;

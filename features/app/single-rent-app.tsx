@@ -1,7 +1,7 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useState, type ReactNode } from "react";
+import { motion } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
@@ -49,18 +49,11 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { calculateRentalCheckout, formatNaira } from "@/lib/pricing";
 import { viewPaths, type View } from "@/lib/routes";
 import type { AccountRole } from "@/lib/account";
 import { api, registrationDraftStore, sessionStore, type ApiListing, type ApiSession } from "@/lib/api";
+import { useAppSession } from "@/features/app/app-provider";
 import { AdminManagement, Permissions } from "@/features/admin/management";
 import {
   AgentWorkspace,
@@ -80,7 +73,6 @@ import {
 } from "@/features/homes/portfolio";
 
 export type { View } from "@/lib/routes";
-export type { AccountRole } from "@/lib/account";
 const directRentalCheckout = calculateRentalCheckout({
   annualRent: 4800000,
   cautionFee: 250000,
@@ -138,20 +130,6 @@ function Back({ go, to = "home" }: { go: (v: View) => void; to?: View }) {
       Back
     </button>
   );
-}
-
-type AppSessionContext = {
-  session: ApiSession | null;
-  signOut: () => Promise<void>;
-};
-
-const AppSession = createContext<AppSessionContext>({
-  session: null,
-  signOut: async () => undefined,
-});
-
-export function useAppSession() {
-  return useContext(AppSession);
 }
 
 function nairaFromKobo(value: string | number) {
@@ -2766,29 +2744,31 @@ function States({ go }: { go: (v: View) => void }) {
     </Shell>
   );
 }
+export {
+  Admin as AdminDashboardScreen,
+  Apply as ApplicationScreen,
+  Assistant as PropertyAssistantScreen,
+  Confirmation as BookingConfirmationScreen,
+  Escrow as EscrowScreen,
+  Explore as ExploreHomesScreen,
+  Landlord as LandlordDashboardScreen,
+  Landing as HomeScreen,
+  Listing as ListingDetailsScreen,
+  Maintenance as TenantMaintenanceScreen,
+  Payment as PaymentScreen,
+  Questions as LandlordQuestionsScreen,
+  States as SystemStatesScreen,
+  Tenant as TenantDashboardScreen,
+  Wizard as ListingWizardScreen,
+};
+
+/** @deprecated Routes now import their own feature pages directly. */
 export function SingleRentApp({ initialView }: { initialView: View }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [accountRole, setAccountRole] = useState<AccountRole>("tenant");
   const [gate, setGate] = useState(false);
-  const [session, setSession] = useState<ApiSession | null>(null);
-  useEffect(() => {
-    const stored = sessionStore.get();
-    if (!stored) return;
-    setSession(stored);
-    api.auth.me(stored.accessToken)
-      .then((user) => {
-        const refreshed = { ...stored, user };
-        sessionStore.set(refreshed);
-        setSession(refreshed);
-      })
-      .catch((cause: unknown) => {
-        if (typeof cause === "object" && cause !== null && "status" in cause && (cause as { status?: number }).status === 401) {
-          sessionStore.clear();
-          setSession(null);
-        }
-      });
-  }, []);
+  const { setSession } = useAppSession();
   const requestedRole = searchParams.get("role");
   const kycRole: AccountRole =
     requestedRole === "tenant" ||
@@ -2810,19 +2790,6 @@ export function SingleRentApp({ initialView }: { initialView: View }) {
   const handleAuthenticated = (session: ApiSession) => {
     setSession(session);
     router.push(viewPaths[destinationFor(session)]);
-  };
-  const signOut = async () => {
-    const activeSession = session;
-    sessionStore.clear();
-    setSession(null);
-    router.push(viewPaths.home);
-    if (activeSession) {
-      try {
-        await api.auth.logout(activeSession.accessToken, activeSession.refreshToken);
-      } catch {
-        // Local session is cleared even when the API is temporarily unavailable.
-      }
-    }
   };
   const registerWithRole = async (role: AccountRole): Promise<void> => {
     const draft = registrationDraftStore.get();
@@ -2881,7 +2848,6 @@ export function SingleRentApp({ initialView }: { initialView: View }) {
     adminops: <OperationsAdmin go={go} />,
   };
   return (
-    <AppSession.Provider value={{ session, signOut }}>
     <div className="min-h-screen bg-white">
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
@@ -2928,6 +2894,5 @@ export function SingleRentApp({ initialView }: { initialView: View }) {
         </DialogContent>
       </Dialog>
     </div>
-    </AppSession.Provider>
   );
 }

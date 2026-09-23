@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { ListPropertyPage } from '@/features/landlord/pages';
 
-export default function ListPropertyPage() {
-  return <RouteView view="wizard" />;
-}
+export default ListPropertyPage;

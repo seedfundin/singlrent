@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { AccountTypePage } from '@/features/auth/pages';
 
-export default function AccountTypePage() {
-  return <RouteView view="account-type" />;
-}
+export default AccountTypePage;

@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { AdminDashboardPage } from '@/features/admin/pages';
 
-export default function AdminDashboardPage() {
-  return <RouteView view="admin" />;
-}
+export default AdminDashboardPage;

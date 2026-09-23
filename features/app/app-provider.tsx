@@ -1,0 +1,67 @@
+"use client";
+
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { api, sessionStore, type ApiSession } from "@/lib/api";
+import { viewPaths, type View } from "@/lib/routes";
+
+type AppSessionContext = {
+  session: ApiSession | null;
+  setSession: (session: ApiSession | null) => void;
+  signOut: () => Promise<void>;
+};
+
+const AppSession = createContext<AppSessionContext | null>(null);
+
+export function AppProvider({ children }: { children: ReactNode }) {
+  const router = useRouter();
+  const [session, setSession] = useState<ApiSession | null>(null);
+
+  useEffect(() => {
+    const stored = sessionStore.get();
+    if (!stored) return;
+    setSession(stored);
+    api.auth.me(stored.accessToken)
+      .then((user) => {
+        const refreshed = { ...stored, user };
+        sessionStore.set(refreshed);
+        setSession(refreshed);
+      })
+      .catch((cause: unknown) => {
+        if (typeof cause === "object" && cause !== null && "status" in cause && (cause as { status?: number }).status === 401) {
+          sessionStore.clear();
+          setSession(null);
+        }
+      });
+  }, []);
+
+  const signOut = async () => {
+    const activeSession = session;
+    sessionStore.clear();
+    setSession(null);
+    router.push(viewPaths.home);
+    if (!activeSession) return;
+    try {
+      await api.auth.logout(activeSession.accessToken, activeSession.refreshToken);
+    } catch {
+      // The device session is cleared even if the API is temporarily unavailable.
+    }
+  };
+
+  return <AppSession.Provider value={{ session, setSession, signOut }}>{children}</AppSession.Provider>;
+}
+
+export function useAppSession() {
+  const context = useContext(AppSession);
+  if (!context) throw new Error("useAppSession must be used inside AppProvider.");
+  return context;
+}
+
+export function useAppNavigation() {
+  const router = useRouter();
+  const go = (view: View, query?: Record<string, string>) => {
+    const parameters = query ? new URLSearchParams(query).toString() : "";
+    router.push(parameters ? `${viewPaths[view]}?${parameters}` : viewPaths[view]);
+  };
+  return { go, router };
+}

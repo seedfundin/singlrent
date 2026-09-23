@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { BookingConfirmationPage } from '@/features/rentals/pages';
 
-export default function BookingConfirmedPage() {
-  return <RouteView view="confirmation" />;
-}
+export default BookingConfirmationPage;

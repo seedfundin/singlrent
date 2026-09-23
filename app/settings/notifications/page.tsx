@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { NotificationSettingsPage } from '@/features/product/pages';
 
-export default function NotificationSettingsPage() {
-  return <RouteView view="notifications" />;
-}
+export default NotificationSettingsPage;

@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { AgentMaintenancePage } from '@/features/agent/pages';
 
-export default function AgentPropertyMaintenancePage() {
-  return <RouteView view="agent-maintenance" />;
-}
+export default AgentMaintenancePage;

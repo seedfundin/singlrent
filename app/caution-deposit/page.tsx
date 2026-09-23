@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { CautionDepositPage } from '@/features/product/pages';
 
-export default function CautionDepositPage() {
-  return <RouteView view="deposit" />;
-}
+export default CautionDepositPage;

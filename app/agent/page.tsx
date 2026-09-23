@@ -1,5 +1,3 @@
-import { RouteView } from '@/components/routes/route-view';
+import { AgentDashboardPage } from '@/features/agent/pages';
 
-export default function AgentWorkspacePage() {
-  return <RouteView view="agent" />;
-}
+export default AgentDashboardPage;
