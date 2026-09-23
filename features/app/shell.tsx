@@ -96,17 +96,35 @@ function destinationFor(session: ApiSession): View {
 
 export function PublicHeader({ go }: { go: Navigate }) {
   const { session, signOut } = useAppSession();
+  const workspace = session ? destinationFor(session) : null;
+  const isLandlord = session?.user.roles.includes("LANDLORD") ?? false;
+  const isAgent = session?.user.roles.includes("AGENT") ?? false;
   return (
     <header className="head">
       <Brand go={go} />
       <nav>
         <button onClick={() => go("explore")}>Explore homes</button>
-        <button onClick={() => go("home")}>How it works</button>
-        <button onClick={() => go("sign-up")}>For landlords</button>
+        {session ? (
+          <>
+            {isLandlord ? (
+              <button onClick={() => go("landlord-homes")}>My homes</button>
+            ) : isAgent ? (
+              <button onClick={() => go("agent-homes")}>Managed homes</button>
+            ) : (
+              <button onClick={() => go("saved-homes")}>Saved homes</button>
+            )}
+            <button onClick={() => go(workspace!)}>My dashboard</button>
+          </>
+        ) : (
+          <>
+            <button onClick={() => go("home")}>How it works</button>
+            <button onClick={() => go("sign-up")}>For landlords</button>
+          </>
+        )}
       </nav>
       {session ? (
         <div>
-          <Button variant="ghost" onClick={() => go(destinationFor(session))}><UserRound size={15} /> {session.user.firstName}</Button>
+          <Button variant="ghost" onClick={() => go(workspace!)}><UserRound size={15} /> {session.user.firstName}</Button>
           <Button variant="outline" onClick={() => void signOut()}><LogOut size={14} /> Sign out</Button>
         </div>
       ) : (
