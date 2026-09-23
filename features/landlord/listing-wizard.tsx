@@ -59,6 +59,7 @@ export function ListingWizard({ go }: { go: Navigate }) {
   const [selectedAddress, setSelectedAddress] = useState("");
   const [results, setResults] = useState<GeocodingSuggestion[]>([]);
   const [searching, setSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
   const [locationError, setLocationError] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -68,16 +69,18 @@ export function ListingWizard({ go }: { go: Navigate }) {
     if (!session || query.length < 3 || query === selectedAddress) {
       setResults([]);
       setLocationError("");
+      setHasSearched(false);
       return;
     }
     let active = true;
     const timer = window.setTimeout(() => {
       setSearching(true);
+      setHasSearched(false);
       setLocationError("");
       api.geocoding.search(session.accessToken, query)
         .then((suggestions) => active && setResults(suggestions))
         .catch((cause: unknown) => active && setLocationError(cause instanceof Error ? cause.message : "Address search is unavailable."))
-        .finally(() => active && setSearching(false));
+        .finally(() => { if (active) { setSearching(false); setHasSearched(true); } });
     }, 350);
     return () => { active = false; window.clearTimeout(timer); };
   }, [form.address, session]);
@@ -92,6 +95,7 @@ export function ListingWizard({ go }: { go: Navigate }) {
     setSelectedAddress(result.address);
     setCoordinates({ latitude: result.latitude, longitude: result.longitude });
     setResults([]);
+    setHasSearched(false);
     setLocationError("");
   };
 
@@ -159,7 +163,7 @@ export function ListingWizard({ go }: { go: Navigate }) {
             <label>State<input value={form.state} onChange={(event) => update("state", event.target.value)} placeholder="e.g. Lagos" /></label>
             <label>Area<input value={form.area} onChange={(event) => update("area", event.target.value)} placeholder="e.g. Mushin" /></label>
             <label className="full">Search property address<input value={form.address} onChange={(event) => { update("address", event.target.value); setSelectedAddress(""); setCoordinates(null); }} placeholder="22 Ikale Street, Mushin, Lagos" autoComplete="off" /></label>
-            <div className="geocode-results full" aria-live="polite">{searching && <small>Finding addresses…</small>}{locationError && <small className="error"><CircleAlert size={13} /> {locationError}</small>}{results.map((result) => <button type="button" key={result.id} onClick={() => chooseAddress(result)}><MapPin size={15} /><span><b>{result.address}</b><small>{formatCoordinate(result.latitude)}, {formatCoordinate(result.longitude)}</small></span></button>)}</div>
+            <div className="geocode-results full" aria-live="polite">{searching && <small>Finding addresses…</small>}{locationError && <small className="error"><CircleAlert size={13} /> {locationError}</small>}{hasSearched && !searching && !locationError && results.length === 0 && <small>No indexed address match. Keep your address, then click the map or drag the marker to the exact building.</small>}{results.map((result) => <button type="button" key={result.id} onClick={() => chooseAddress(result)}><MapPin size={15} /><span><b>{result.address}</b><small>{formatCoordinate(result.latitude)}, {formatCoordinate(result.longitude)}</small></span></button>)}</div>
             <div className="full map-picker"><PropertyLocationMap value={coordinates} onChange={setCoordinates} interactive /><p><MapPin size={15} /><span><b>Pin the exact building</b><small>Choose a suggestion, then drag the marker or click the map to set the final position. We will save this exact point without geocoding again.</small></span></p>{coordinates && showCoordinateDebug && <code className="coordinate-debug">lat {formatCoordinate(coordinates.latitude)} · lng {formatCoordinate(coordinates.longitude)}</code>}</div>
           </div>}
           {step === 2 && <div className="details"><span>Bedrooms<b><button type="button" onClick={() => update("bedrooms", Math.max(0, form.bedrooms - 1))}>−</button>{form.bedrooms}<button type="button" onClick={() => update("bedrooms", form.bedrooms + 1)}>+</button></b></span><span>Bathrooms<b><button type="button" onClick={() => update("bathrooms", Math.max(0, form.bathrooms - 1))}>−</button>{form.bathrooms}<button type="button" onClick={() => update("bathrooms", form.bathrooms + 1)}>+</button></b></span><label>Description<textarea value={form.description} onChange={(event) => update("description", event.target.value)} placeholder="Describe the home, its condition and what makes it a good fit." /></label><div>{amenityOptions.map((amenity) => <button type="button" className={form.amenities.includes(amenity) ? "selected" : ""} onClick={() => toggleAmenity(amenity)} key={amenity}><Check size={12} />{amenity}</button>)}</div></div>}
