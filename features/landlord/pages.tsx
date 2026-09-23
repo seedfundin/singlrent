@@ -2,7 +2,7 @@
 
 import { useAppNavigation } from "@/features/app/app-provider";
 import { ManagedHomeDetails, ManagedHomes, PropertyMaintenance } from "@/features/homes/portfolio";
-import { LandlordDashboardScreen, LandlordQuestionsScreen, ListingWizardScreen } from "@/features/app/single-rent-app";
+import { LandlordDashboardScreen, LandlordQuestionsScreen, ListingWizardScreen } from "@/features/legacy/legacy-screens";
 
 export function LandlordDashboardPage() { const { go } = useAppNavigation(); return <LandlordDashboardScreen go={go} />; }
 export function LandlordHomesPage() { const { go } = useAppNavigation(); return <ManagedHomes go={go} manager="landlord" />; }

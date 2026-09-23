@@ -3,7 +3,7 @@
 import { useAppNavigation } from "@/features/app/app-provider";
 import { AdminManagement, Permissions } from "@/features/admin/management";
 import { OperationsAdmin } from "@/features/product/expansion";
-import { AdminDashboardScreen, EscrowScreen, SystemStatesScreen } from "@/features/app/single-rent-app";
+import { AdminDashboardScreen, EscrowScreen, SystemStatesScreen } from "@/features/legacy/legacy-screens";
 
 export function AdminDashboardPage() { const { go } = useAppNavigation(); return <AdminDashboardScreen go={go} />; }
 export function AdminManagementPage() { const { go } = useAppNavigation(); return <AdminManagement go={go} />; }

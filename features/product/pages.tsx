@@ -1,7 +1,7 @@
 "use client";
 
 import { useAppNavigation } from "@/features/app/app-provider";
-import { PropertyAssistantScreen } from "@/features/app/single-rent-app";
+import { PropertyAssistantScreen } from "@/features/legacy/legacy-screens";
 import { CautionDeposit, IncidentReports, NotificationSettings, ReviewsRatings } from "@/features/product/expansion";
 
 export function PropertyAssistantPage() { const { go } = useAppNavigation(); return <PropertyAssistantScreen go={go} />; }

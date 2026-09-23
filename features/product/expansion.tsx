@@ -32,7 +32,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Shell } from '@/features/app/single-rent-app';
+import { Shell } from '@/features/app/shell';
 import type { View } from '@/lib/routes';
 import { PaymentBreakdown } from '@/components/payment-breakdown';
 import {
