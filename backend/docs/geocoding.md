@@ -1,16 +1,19 @@
-# Address search configuration
+# Mapbox location configuration
 
-SingleRent renders maps with MapLibre and OpenStreetMap tiles. Address search is deliberately handled by the backend so a browser never calls the public OpenStreetMap Nominatim service or receives a provider key.
+SingleRent uses Mapbox GL JS for map rendering and Mapbox Geocoding for address search. Address search is handled by the backend so the browser never receives the server-side Mapbox token.
 
-The current provider adapter uses Geoapify Address Autocomplete. Add the following to your local `backend/.env` after creating a Geoapify API key:
+Create two Mapbox tokens: a server-side token for geocoding and a public token for map rendering. Add the server token to your local `backend/.env`:
 
 ```dotenv
-GEOCODING_PROVIDER=geoapify
-GEOCODING_API_KEY=replace-with-your-server-side-key
-GEOCODING_BASE_URL=https://api.geoapify.com
-GEOCODING_COUNTRY_CODE=ng
+MAPBOX_ACCESS_TOKEN=replace-with-your-server-side-mapbox-token
 ```
 
-`GET /api/v1/geocoding/search?q=22%20Ikale%20Street%2C%20Mushin%2C%20Lagos` is authenticated and restricted to landlord and agent roles. The frontend debounces requests to that endpoint and never sends the final map pin back to the geocoder. If the provider is not configured, the endpoint returns a clear `503` response rather than silently falling back to public Nominatim.
+Add the public map-rendering token to the root frontend `.env.local` file:
 
-To switch providers later, keep the endpoint response shape (`id`, `address`, `latitude`, `longitude`) and add a provider branch or provider class in `src/geocoding/geocoding.service.ts`. The frontend does not need to change.
+```dotenv
+NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=replace-with-your-public-mapbox-token
+```
+
+`GET /api/v1/geocoding/search?q=22%20Ikale%20Street%2C%20Mushin%2C%20Lagos` is authenticated and restricted to landlord and agent roles. The frontend debounces requests to that endpoint and never sends the final map pin back to the geocoder. Mapbox receives `permanent=true` because the landlord’s selected coordinates are stored with a listing.
+
+To switch providers later, keep the endpoint response shape (`id`, `address`, `latitude`, `longitude`) and replace the implementation in `src/geocoding/geocoding.service.ts`. The frontend does not need to change.
