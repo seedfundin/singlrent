@@ -18,27 +18,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<ApiSession | null>(null);
 
   useEffect(() => {
+    const unsubscribe = sessionStore.subscribe(setSession);
     const stored = sessionStore.get();
-    if (!stored) return;
     setSession(stored);
+    if (!stored) return unsubscribe;
+
     api.auth.me(stored.accessToken)
       .then((user) => {
-        const refreshed = { ...stored, user };
-        sessionStore.set(refreshed);
-        setSession(refreshed);
+        // A 401 may have rotated the session. Preserve the newest token pair.
+        const activeSession = sessionStore.get();
+        if (activeSession) sessionStore.set({ ...activeSession, user });
       })
       .catch((cause: unknown) => {
         if (typeof cause === "object" && cause !== null && "status" in cause && (cause as { status?: number }).status === 401) {
           sessionStore.clear();
-          setSession(null);
         }
       });
+    return unsubscribe;
   }, []);
+
+  const updateSession = (nextSession: ApiSession | null) => {
+    if (nextSession) sessionStore.set(nextSession);
+    else sessionStore.clear();
+  };
 
   const signOut = async () => {
     const activeSession = session;
     sessionStore.clear();
-    setSession(null);
     router.push(viewPaths.home);
     if (!activeSession) return;
     try {
@@ -48,7 +54,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  return <AppSession.Provider value={{ session, setSession, signOut }}>{children}</AppSession.Provider>;
+  return <AppSession.Provider value={{ session, setSession: updateSession, signOut }}>{children}</AppSession.Provider>;
 }
 
 export function useAppSession() {

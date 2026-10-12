@@ -12,24 +12,26 @@ const environmentSchema = z.object({
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
   JWT_ACCESS_SECRET: z.string().min(32),
-  JWT_ACCESS_TTL: z.string().min(2).default('15m'),
+  JWT_ACCESS_TTL: z.string().min(2).default('1h'),
   JWT_REFRESH_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
   PASSWORD_HASH_ROUNDS: z.coerce.number().int().min(10).max(14).default(12),
   FIELD_ENCRYPTION_SECRET: z.string().min(32).default('local-development-field-encryption-secret-change-me'),
   PAYSTACK_SECRET_KEY: z.string().min(1).optional(),
   PAYSTACK_BASE_URL: z.string().url().default('https://api.paystack.co'),
   PAYSTACK_CALLBACK_URL: z.string().url().optional(),
-  CLOUDINARY_CLOUD_NAME: z.string().min(1).optional(),
-  CLOUDINARY_API_KEY: z.string().min(1).optional(),
-  CLOUDINARY_API_SECRET: z.string().min(1).optional(),
-  // Dojah verifies NINs against NIMC. Its secret key is backend-only.
+  CLOUDFLARE_ACCOUNT_ID: z.string().min(1).optional(),
+  CLOUDFLARE_R2_ACCESS_KEY_ID: z.string().min(1).optional(),
+  CLOUDFLARE_R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  CLOUDFLARE_R2_BUCKET_NAME: z.string().min(1).optional(),
+  CLOUDFLARE_R2_PUBLIC_URL: z.string().url().optional(),
+  // Dojah API credentials are backend-only. The hosted publisher-verification
+  // widget uses a separate browser-safe public key.
   DOJAH_BASE_URL: z.string().url().default('https://api.dojah.io'),
   DOJAH_APP_ID: z.string().min(1).optional(),
   DOJAH_SECRET_KEY: z.string().min(1).optional(),
+  DOJAH_WEBHOOK_SECRET: z.string().min(1).optional(),
   GOOGLE_OAUTH_CLIENT_ID: z.string().min(1).optional(),
   GOOGLE_TOKEN_INFO_URL: z.string().url().default('https://oauth2.googleapis.com/tokeninfo'),
-  // Mapbox geocoding stays server-side. Map rendering uses a public frontend token.
-  MAPBOX_ACCESS_TOKEN: z.string().min(1).optional(),
 });
 
 export type EnvironmentVariables = z.infer<typeof environmentSchema>;

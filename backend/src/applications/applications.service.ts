@@ -4,7 +4,6 @@ import { AuditService } from '../common/database/audit.service';
 import { pageResult, Paginated } from '../common/http/pagination';
 import { PrismaService } from '../common/database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { KycService } from '../users/kyc.service';
 import { ApplicationQuery, CreateApplicationRequest, RejectApplicationRequest } from './dto/application.schemas';
 
 const applicationInclude = {
@@ -22,13 +21,11 @@ const cancellableStatuses: ApplicationStatus[] = [ApplicationStatus.PENDING, App
 export class ApplicationsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly kycService: KycService,
     private readonly audit: AuditService,
     private readonly notificationsService: NotificationsService,
   ) {}
 
   async create(tenantId: string, input: CreateApplicationRequest): Promise<ApplicationView> {
-    await this.kycService.assertVerified(tenantId);
     const listing = await this.prisma.listing.findFirst({
       where: { id: input.listingId, status: ListingStatus.PUBLISHED, availability: ListingAvailability.AVAILABLE },
     });

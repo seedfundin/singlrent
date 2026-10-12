@@ -16,6 +16,7 @@ import {
   MapPin,
   MessageCircle,
   Plus,
+  PencilLine,
   ShieldCheck,
   UserRound,
   Users,
@@ -26,10 +27,13 @@ import { Shell } from '@/features/app/shell';
 import type { View } from '@/lib/routes';
 import { api, type ApiListing, type ApiMaintenanceRequest, sessionStore } from '@/lib/api';
 import { formatNaira } from '@/lib/pricing';
+import { listingImages } from '@/features/listings/listing-card';
 import './portfolio.css';
+import './portfolio-review.css';
 
 type Go = (view: View, query?: Record<string, string>) => void;
 type Manager = 'landlord' | 'agent';
+type StatusTone = 'green' | 'gold' | 'red' | 'blue' | 'slate';
 
 function nairaFromKobo(value: string | number) {
   const amount = Number(value);
@@ -37,12 +41,23 @@ function nairaFromKobo(value: string | number) {
 }
 
 function homeImage(home: ApiListing) {
-  return home.images[0]?.url;
+  return listingImages(home)[0]?.url;
 }
 
 function HomePhoto({ home, alt = '' }: { home: ApiListing; alt?: string }) {
   const image = homeImage(home);
   return image ? <img src={image} alt={alt || home.title} referrerPolicy="no-referrer" /> : <span className="portfolio-photo-empty"><Building2 size={18} /> Photo pending</span>;
+}
+
+function listingStatusLabel(status: ApiListing['status']) {
+  return status === 'PENDING_REVIEW' ? 'Under review' : status.toLowerCase().replace('_', ' ');
+}
+
+function listingStatusTone(status: ApiListing['status']): StatusTone {
+  if (status === 'PUBLISHED') return 'green';
+  if (status === 'PENDING_REVIEW') return 'gold';
+  if (status === 'REJECTED' || status === 'SUSPENDED') return 'red';
+  return 'slate';
 }
 
 function useListings(kind: 'saved' | 'mine') {
@@ -74,7 +89,7 @@ function Status({
   tone = 'green',
 }: {
   children: React.ReactNode;
-  tone?: 'green' | 'gold' | 'red' | 'blue' | 'slate';
+  tone?: StatusTone;
 }) {
   return <span className={`status ${tone}`}>{children}</span>;
 }
@@ -85,6 +100,7 @@ function managerViews(manager: Manager) {
     home: manager === 'agent' ? 'agent-home' : 'landlord-home',
     maintenance:
       manager === 'agent' ? 'agent-maintenance' : 'landlord-maintenance',
+    edit: manager === 'agent' ? 'agent-edit' : 'landlord-edit',
   } as const;
 }
 
@@ -94,14 +110,14 @@ function managerCopy(manager: Manager) {
         heading: 'Managed homes',
         copy: 'See the homes you manage, their tenants and incoming maintenance cases.',
         eyebrow: 'Agent property management',
-        owner: 'Managed for Jide Ojo',
+        owner: 'Managed for property owners',
         add: 'Add a managed property',
       }
     : {
         heading: 'My homes',
         copy: 'See every home you have created, its tenancy and property activity.',
         eyebrow: 'Property portfolio',
-        owner: 'Owned by Jide Ojo',
+        owner: 'Your property portfolio',
         add: 'Add a property',
       };
 }
@@ -145,7 +161,7 @@ export function SavedHomes({ go }: { go: Go }) {
                 <div className="saved-home-copy">
                   <div>
                     <Status tone="green">
-                      <ShieldCheck size={11} /> Verified
+                      <ShieldCheck size={11} /> Saved
                     </Status>
                     <button
                       className="saved-heart"
@@ -177,7 +193,7 @@ export function SavedHomes({ go }: { go: Go }) {
               <Heart size={22} />
             </i>
             <h2>Your saved homes will appear here.</h2>
-            <p>Explore verified homes and save the ones you want to compare later.</p>
+            <p>Explore homes and save the ones you want to compare later.</p>
             <Button onClick={() => go('explore')}>Explore homes</Button>
           </section>
         )}
@@ -254,6 +270,7 @@ export function ManagedHomes({
                   <Status tone={home.availability === 'AVAILABLE' ? 'green' : 'slate'}>
                     {home.availability.toLowerCase()}
                   </Status>
+                  <Status tone={listingStatusTone(home.status)}>{listingStatusLabel(home.status)}</Status>
                 </span>
               </span>
               <span className="portfolio-tenant">
@@ -292,13 +309,41 @@ export function ManagedHomeDetails({
   const [home, setHome] = useState<ApiListing | null>(null);
   const [loading, setLoading] = useState(Boolean(listingId));
   const [error, setError] = useState<string | null>(listingId ? null : 'Select one of your homes to view its details.');
+  const [publishing, setPublishing] = useState(false);
+  const [publicationError, setPublicationError] = useState<string | null>(null);
   useEffect(() => {
     if (!listingId) return;
-    api.listings.detail(listingId)
+    const session = sessionStore.get();
+    if (!session) {
+      setError('Sign in to view this home.');
+      setLoading(false);
+      return;
+    }
+    // Managed listings can include private, suspended, or legacy statuses. They must not use the
+    // public endpoint, which intentionally exposes published homes only.
+    api.listings.managedDetail(session.accessToken, listingId)
       .then(setHome)
       .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'Unable to load this home.'))
       .finally(() => setLoading(false));
   }, [listingId]);
+
+  const publishListing = async () => {
+    if (!home) return;
+    const session = sessionStore.get();
+    if (!session) {
+      setPublicationError('Sign in to publish this listing.');
+      return;
+    }
+    setPublishing(true);
+    setPublicationError(null);
+    try {
+      setHome(await api.listings.publish(session.accessToken, home.id));
+    } catch (cause: unknown) {
+      setPublicationError(cause instanceof Error ? cause.message : 'Unable to publish this listing.');
+    } finally {
+      setPublishing(false);
+    }
+  };
 
   if (loading || error || !home) {
     return (
@@ -330,9 +375,40 @@ export function ManagedHomeDetails({
                 <BedDouble size={11} /> {home.bedrooms} bedrooms
               </Status>
               <Status tone="gold">{formatNaira(nairaFromKobo(home.annualRentKobo))} / year</Status>
+              <Status tone={listingStatusTone(home.status)}>{listingStatusLabel(home.status)}</Status>
             </div>
           </span>
+          {home.status !== 'ARCHIVED' && <Button variant="outline" className="home-detail-edit" onClick={() => go(views.edit, { listing: home.id })}>
+            <PencilLine size={14} /> Edit listing
+          </Button>}
         </section>
+
+        {home.status !== 'PUBLISHED' && home.status !== 'ARCHIVED' && (
+          <section className="panel listing-review-panel">
+            <div>
+              {home.status === 'SUSPENDED' ? (
+                <>
+                  <small>Listing unavailable</small>
+                  <h2>This listing has been suspended</h2>
+                  <p>{home.moderationNote ?? 'It is not visible to tenants while this status is in place. Contact SingleRent support if you need help.'}</p>
+                </>
+              ) : (
+                <>
+                  <small>Instant publishing</small>
+                  <h2>Publish this listing</h2>
+                  <p>Verified landlord and agent listings publish immediately once they include 3–4 photos and one video. No admin approval is required.</p>
+                </>
+              )}
+              {publicationError && <p className="listing-review-error" role="alert"><CircleAlert size={14} /> {publicationError}</p>}
+              {publicationError?.includes('Complete Dojah') && <Button variant="outline" onClick={() => go('publisher-verification')}><ShieldCheck size={14} /> Verify publisher account</Button>}
+            </div>
+            {(home.status === 'DRAFT' || home.status === 'REJECTED' || home.status === 'PENDING_REVIEW') && (
+              <Button onClick={() => void publishListing()} disabled={publishing}>
+                {publishing ? 'Publishing…' : 'Publish listing'} <ArrowRight size={14} />
+              </Button>
+            )}
+          </section>
+        )}
 
         <div className="home-detail-grid">
           <section className="panel home-occupants">
@@ -496,7 +572,7 @@ export function PropertyMaintenance({
               <Wrench size={17} />
               <span>
                 <b>{manager === 'agent' ? 'Managing for the landlord' : 'Landlord maintenance'}</b>
-                <small>{manager === 'agent' ? 'Jide Ojo remains copied on updates and decisions.' : 'This workspace receives issues; tenants submit them from their own maintenance area.'}</small>
+                <small>{manager === 'agent' ? 'The property owner remains included on relevant updates and decisions.' : 'This workspace receives issues; tenants submit them from their own maintenance area.'}</small>
               </span>
             </section>
           </aside>

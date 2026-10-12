@@ -18,13 +18,13 @@ export function AccessGate({ open, onOpenChange, go }: { open: boolean; onOpenCh
       <DialogContent className="gate">
         <DialogHeader>
           <i><ShieldCheck size={22} /></i>
-          <DialogTitle>Verify before you continue</DialogTitle>
-          <DialogDescription>Phone and identity verification are required to ask the landlord about this home. It keeps every conversation safe and relevant.</DialogDescription>
+          <DialogTitle>Sign in to continue</DialogTitle>
+          <DialogDescription>Sign in to ask questions, contact a landlord, save homes, or apply. NIN verification is only requested when you make your first rent payment or withdraw a payout.</DialogDescription>
         </DialogHeader>
-        <p><Check size={14} /> Ask Property AI and landlords <Check size={14} /> Apply and pay securely</p>
+        <p><Check size={14} /> No KYC for property questions or messages <Check size={14} /> KYC is only needed for payment or payout</p>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Not now</Button>
-          <Button onClick={() => { onOpenChange(false); go("kyc"); }}>Verify now <ArrowRight size={14} /></Button>
+          <Button onClick={() => { onOpenChange(false); go("sign-in"); }}>Sign in <ArrowRight size={14} /></Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

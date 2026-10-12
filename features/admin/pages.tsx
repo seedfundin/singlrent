@@ -1,13 +1,14 @@
 "use client";
 
 import { useAppNavigation } from "@/features/app/app-provider";
-import { AdminManagement, Permissions } from "@/features/admin/management";
-import { OperationsAdmin } from "@/features/product/expansion";
-import { AdminDashboardScreen, EscrowScreen, SystemStatesScreen } from "@/features/legacy/legacy-screens";
+import { AdminListingReview, LiveAdminDashboard, LiveAdminEscrow, LiveAdminManagement, LiveAdminPermissions, LiveAdminTransactions } from "@/features/admin/live-admin";
+import { AdminOperations, AdminSystemStates } from "@/features/admin/operations";
 
-export function AdminDashboardPage() { const { go } = useAppNavigation(); return <AdminDashboardScreen go={go} />; }
-export function AdminManagementPage() { const { go } = useAppNavigation(); return <AdminManagement go={go} />; }
-export function AdminPermissionsPage() { const { go } = useAppNavigation(); return <Permissions go={go} />; }
-export function AdminEscrowPage() { const { go } = useAppNavigation(); return <EscrowScreen go={go} />; }
-export function AdminSystemStatesPage() { const { go } = useAppNavigation(); return <SystemStatesScreen go={go} />; }
-export function AdminOperationsPage() { const { go } = useAppNavigation(); return <OperationsAdmin go={go} />; }
+export function AdminDashboardPage() { const { go } = useAppNavigation(); return <LiveAdminDashboard go={go} />; }
+export function AdminListingReviewPage() { const { go } = useAppNavigation(); return <AdminListingReview go={go} />; }
+export function AdminTransactionsPage() { const { go } = useAppNavigation(); return <LiveAdminTransactions go={go} />; }
+export function AdminManagementPage() { const { go } = useAppNavigation(); return <LiveAdminManagement go={go} />; }
+export function AdminPermissionsPage() { const { go } = useAppNavigation(); return <LiveAdminPermissions go={go} />; }
+export function AdminEscrowPage() { const { go } = useAppNavigation(); return <LiveAdminEscrow go={go} />; }
+export function AdminSystemStatesPage() { const { go } = useAppNavigation(); return <AdminSystemStates go={go} />; }
+export function AdminOperationsPage() { const { go } = useAppNavigation(); return <AdminOperations go={go} />; }

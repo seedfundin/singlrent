@@ -1,0 +1,10 @@
+.reviews-live .live-dashboard-panel { padding: 18px; }
+.review-opportunities { display: grid; }
+.review-opportunities article { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; padding: 14px 4px; border-top: 1px solid var(--line); }
+.review-opportunities article:first-child { border-top: 0; }
+.review-opportunities article > span { display: grid; gap: 4px; }
+.review-opportunities b { color: #29493d; font-size: 12px; }
+.review-opportunities small { color: #77867d; font-size: 10px; }
+.review-opportunities article > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.review-compose { margin-top: 16px; }
+@media (max-width: 650px) { .review-opportunities article { grid-template-columns: 1fr; } .review-opportunities article > div { justify-content: flex-start; } }

@@ -1,9 +1,10 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { KycStatus } from '@prisma/client';
+import { KycStatus, LedgerAccountCode, LedgerEntryType, Prisma, VerificationServiceChargeSource, VerificationServiceChargeStatus } from '@prisma/client';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'crypto';
 import { AuditService } from '../common/database/audit.service';
 import { PrismaService } from '../common/database/prisma.service';
+import { PaystackService } from '../integrations/paystack.service';
 import {
   ConfirmPhoneVerificationRequest,
   SendPhoneVerificationRequest,
@@ -13,10 +14,13 @@ import { DojahVerificationService, type DojahNinLookup } from './dojah-verificat
 
 @Injectable()
 export class KycService {
+  static readonly SERVICE_FEE_KOBO = 10_000n;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly dojahVerificationService: DojahVerificationService,
+    private readonly paystack: PaystackService,
     private readonly audit: AuditService,
   ) {}
 
@@ -78,97 +82,166 @@ export class KycService {
   }
 
   async submitNin(userId: string, input: SubmitNinRequest) {
+    void userId;
+    void input;
+    throw new BadRequestException('Start NIN verification from a payment or payout. Each Dojah check has a ₦100 service fee.');
+  }
+
+  async initializeTenantVerification(userId: string, input: SubmitNinRequest) {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, include: { kyc: true } });
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-    if (!user.phone || !user.phoneVerifiedAt || user.kyc?.phoneStatus !== KycStatus.VERIFIED) {
-      throw new BadRequestException('Verify your phone number before submitting your NIN');
-    }
+    if (!user) throw new NotFoundException('User not found');
+    this.assertEmailVerified(user.emailVerifiedAt);
     if (user.kyc?.status === KycStatus.VERIFIED) {
-      throw new BadRequestException('Your identity has already been verified by Dojah');
+      throw new ConflictException('Your identity is already verified; no service fee is required');
     }
 
-    const now = new Date();
-    const providerReference = `dojah_${randomUUID()}`;
-    await this.prisma.kycProfile.upsert({
-      where: { userId },
-      create: {
+    const reference = `srk_${randomUUID().replace(/-/g, '')}`;
+    const charge = await this.prisma.verificationServiceCharge.create({
+      data: {
         userId,
+        source: VerificationServiceChargeSource.TENANT_PAYMENT,
+        amountKobo: KycService.SERVICE_FEE_KOBO,
+        paystackReference: reference,
         ninCiphertext: this.encrypt(input.nin),
         ninLast4: input.nin.slice(-4),
-        ninStatus: KycStatus.PENDING,
-        phoneStatus: KycStatus.VERIFIED,
-        status: KycStatus.PENDING,
-        providerReference,
-        submittedAt: now,
       },
-      update: {
-        ninCiphertext: this.encrypt(input.nin),
-        ninLast4: input.nin.slice(-4),
-        ninStatus: KycStatus.PENDING,
-        phoneStatus: KycStatus.VERIFIED,
-        status: KycStatus.PENDING,
-        providerReference,
-        submittedAt: now,
-        verifiedAt: null,
-        rejectionReason: null,
-      },
+      select: { id: true, amountKobo: true, currency: true, paystackReference: true, status: true },
     });
-    await this.audit.record({ actorUserId: userId, action: 'kyc.dojah_started', entityType: 'kyc_profile', entityId: userId });
-
-    let verification: DojahNinLookup;
     try {
-      verification = await this.dojahVerificationService.verifyNin(input.nin);
-    } catch (error) {
+      const initialized = await this.paystack.initializeTransaction({
+        email: user.email,
+        amountKobo: KycService.SERVICE_FEE_KOBO,
+        reference,
+      });
       await this.audit.record({
         actorUserId: userId,
-        action: 'kyc.dojah_confirmation_failed',
-        entityType: 'kyc_profile',
-        entityId: userId,
+        action: 'kyc.service_fee_initialized',
+        entityType: 'verification_service_charge',
+        entityId: charge.id,
+        metadata: { source: VerificationServiceChargeSource.TENANT_PAYMENT },
+      });
+      return {
+        chargeId: charge.id,
+        amountKobo: charge.amountKobo,
+        currency: charge.currency,
+        reference,
+        authorizationUrl: initialized.authorizationUrl,
+        accessCode: initialized.accessCode,
+        status: charge.status,
+      };
+    } catch (error) {
+      await this.prisma.verificationServiceCharge.update({
+        where: { id: charge.id },
+        data: { status: VerificationServiceChargeStatus.FAILED, failureReason: 'Unable to initialize service-fee payment' },
       });
       throw error;
     }
+  }
 
-    const phoneMatchesNimcRecord = verification.verified && this.phoneNumbersMatch(user.phone, verification.phoneNumber);
-    const verified = verification.verified && phoneMatchesNimcRecord;
-    const status = verified ? KycStatus.VERIFIED : KycStatus.REJECTED;
-    const rejectionReason = !verification.verified
-      ? verification.reason
-      : 'The phone number returned by Dojah did not match the verified phone number.';
-    const result = await this.prisma.kycProfile.updateMany({
-      where: {
-        userId,
-        providerReference,
-        phoneStatus: KycStatus.VERIFIED,
-        status: { in: [KycStatus.PENDING, KycStatus.UNDER_REVIEW] },
-      },
-      data: verified
-        ? {
-            status: KycStatus.VERIFIED,
-            ninStatus: KycStatus.VERIFIED,
-            verifiedAt: new Date(),
-            rejectionReason: null,
-          }
-        : {
-            status: KycStatus.REJECTED,
-            ninStatus: KycStatus.REJECTED,
-            verifiedAt: null,
-            phoneStatus: verification.verified ? KycStatus.REJECTED : KycStatus.VERIFIED,
-            rejectionReason,
-          },
+  async processTenantVerificationCharge(
+    reference: string,
+    amountKobo: bigint,
+    currency: string,
+    payload: Prisma.InputJsonValue,
+  ): Promise<boolean> {
+    const charge = await this.prisma.verificationServiceCharge.findUnique({ where: { paystackReference: reference } });
+    if (!charge) return false;
+    if (charge.currency !== currency || charge.amountKobo !== amountKobo) {
+      await this.prisma.verificationServiceCharge.update({
+        where: { id: charge.id },
+        data: { status: VerificationServiceChargeStatus.FAILED, failureReason: 'Paystack amount or currency did not match the service-fee record' },
+      });
+      throw new ConflictException('Paystack amount or currency does not match the service-fee record');
+    }
+    if (charge.status === VerificationServiceChargeStatus.VERIFIED || charge.status === VerificationServiceChargeStatus.REJECTED) {
+      return true;
+    }
+    const claimed = await this.prisma.verificationServiceCharge.updateMany({
+      where: { id: charge.id, status: VerificationServiceChargeStatus.PENDING_PAYMENT },
+      data: { status: VerificationServiceChargeStatus.PROCESSING, paidAt: new Date(), providerPayload: payload },
     });
-    if (result.count === 0) {
-      return { status: KycStatus.PENDING, verified: false, provider: 'DOJAH', superseded: true };
+    if (claimed.count !== 1) return true;
+    await this.verifyChargeWithDojah(charge.id);
+    return true;
+  }
+
+  async verifyTenantServiceChargeForUser(userId: string, chargeId: string) {
+    const charge = await this.prisma.verificationServiceCharge.findFirst({
+      where: { id: chargeId, userId, source: VerificationServiceChargeSource.TENANT_PAYMENT },
+    });
+    if (!charge?.paystackReference) throw new NotFoundException('Verification service charge not found');
+    const verification = await this.paystack.verifyTransaction(charge.paystackReference);
+    if (verification.status !== 'success') {
+      throw new ConflictException('Paystack has not confirmed the ₦100 service-fee payment');
+    }
+    await this.processTenantVerificationCharge(
+      charge.paystackReference,
+      verification.amountKobo,
+      verification.currency,
+      verification.payload as Prisma.InputJsonValue,
+    );
+    return this.getVerificationStatus(userId);
+  }
+
+  async verifyPayoutWithdrawal(userId: string, payoutId: string, input: SubmitNinRequest) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, include: { kyc: true } });
+    if (!user) throw new NotFoundException('User not found');
+    this.assertEmailVerified(user.emailVerifiedAt);
+    if (user.kyc?.status === KycStatus.VERIFIED) {
+      return { verified: true, alreadyVerified: true };
     }
 
-    await this.audit.record({
-      actorUserId: userId,
-      action: verified ? 'kyc.verified_via_dojah' : 'kyc.dojah_verification_rejected',
-      entityType: 'kyc_profile',
-      entityId: userId,
+    const charge = await this.prisma.$transaction(async (transaction) => {
+      const payout = await transaction.payout.findFirst({ where: { id: payoutId, recipientUserId: userId, status: 'PENDING' } });
+      if (!payout) throw new NotFoundException('A pending payout was not found');
+      if (payout.amountKobo - payout.serviceFeeKobo < KycService.SERVICE_FEE_KOBO) {
+        throw new ConflictException('This payout is below the ₦100 verification service fee');
+      }
+      await transaction.payout.update({
+        where: { id: payout.id },
+        data: { serviceFeeKobo: { increment: KycService.SERVICE_FEE_KOBO } },
+      });
+      const debitAccount = payout.kind === 'LANDLORD'
+        ? LedgerAccountCode.LANDLORD_PAYABLE
+        : LedgerAccountCode.AGENT_PAYABLE;
+      await transaction.ledgerEntry.create({
+        data: {
+          paymentId: payout.paymentId,
+          entryType: LedgerEntryType.KYC_SERVICE_FEE_ALLOCATED,
+          debitAccount,
+          creditAccount: LedgerAccountCode.PLATFORM_REVENUE,
+          amountKobo: KycService.SERVICE_FEE_KOBO,
+          idempotencyKey: `verification-service-charge:${payout.id}:${randomUUID()}`,
+          metadata: { payoutId: payout.id, source: VerificationServiceChargeSource.PAYOUT_DEDUCTION },
+        },
+      });
+      return transaction.verificationServiceCharge.create({
+        data: {
+          userId,
+          payoutId: payout.id,
+          source: VerificationServiceChargeSource.PAYOUT_DEDUCTION,
+          status: VerificationServiceChargeStatus.PROCESSING,
+          amountKobo: KycService.SERVICE_FEE_KOBO,
+          providerReference: `dojah_${randomUUID()}`,
+          ninCiphertext: this.encrypt(input.nin),
+          ninLast4: input.nin.slice(-4),
+          paidAt: new Date(),
+        },
+      });
     });
-    return { status, verified, provider: 'DOJAH', providerReference };
+    return this.verifyChargeWithDojah(charge.id);
+  }
+
+  async getVerificationStatus(userId: string) {
+    const [kyc, latestCharge] = await this.prisma.$transaction([
+      this.prisma.kycProfile.findUnique({ where: { userId } }),
+      this.prisma.verificationServiceCharge.findFirst({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, source: true, status: true, amountKobo: true, currency: true, failureReason: true, createdAt: true, processedAt: true },
+      }),
+    ]);
+    return { status: kyc?.status ?? KycStatus.NOT_STARTED, verified: kyc?.status === KycStatus.VERIFIED, latestServiceCharge: latestCharge };
   }
 
   async assertVerified(userId: string): Promise<void> {
@@ -176,6 +249,86 @@ export class KycService {
     if (kyc?.status !== KycStatus.VERIFIED) {
       throw new ForbiddenException('Complete KYC verification before performing this action');
     }
+  }
+
+  private async verifyChargeWithDojah(chargeId: string) {
+    const charge = await this.prisma.verificationServiceCharge.findUnique({ where: { id: chargeId } });
+    if (!charge) throw new NotFoundException('Verification service charge not found');
+    const providerReference = charge.providerReference ?? `dojah_${randomUUID()}`;
+    const nin = this.decrypt(charge.ninCiphertext);
+    const now = new Date();
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.verificationServiceCharge.update({
+        where: { id: charge.id },
+        data: { providerReference, status: VerificationServiceChargeStatus.PROCESSING },
+      });
+      await transaction.kycProfile.upsert({
+        where: { userId: charge.userId },
+        create: {
+          userId: charge.userId,
+          ninCiphertext: charge.ninCiphertext,
+          ninLast4: charge.ninLast4,
+          ninStatus: KycStatus.PENDING,
+          status: KycStatus.PENDING,
+          providerReference,
+          submittedAt: now,
+        },
+        update: {
+          ninCiphertext: charge.ninCiphertext,
+          ninLast4: charge.ninLast4,
+          ninStatus: KycStatus.PENDING,
+          status: KycStatus.PENDING,
+          providerReference,
+          submittedAt: now,
+          verifiedAt: null,
+          rejectionReason: null,
+        },
+      });
+    });
+    await this.audit.record({ actorUserId: charge.userId, action: 'kyc.dojah_started', entityType: 'verification_service_charge', entityId: charge.id });
+
+    let verification: DojahNinLookup;
+    try {
+      verification = await this.dojahVerificationService.verifyNin(nin);
+    } catch (error) {
+      await this.prisma.verificationServiceCharge.update({
+        where: { id: charge.id },
+        data: { status: VerificationServiceChargeStatus.FAILED, failureReason: error instanceof Error ? error.message.slice(0, 1000) : 'Dojah verification failed', processedAt: new Date() },
+      });
+      await this.audit.record({ actorUserId: charge.userId, action: 'kyc.dojah_confirmation_failed', entityType: 'verification_service_charge', entityId: charge.id });
+      throw error;
+    }
+
+    const verified = verification.verified;
+    const status = verified ? KycStatus.VERIFIED : KycStatus.REJECTED;
+    const rejectionReason = verified ? null : verification.reason;
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.verificationServiceCharge.update({
+        where: { id: charge.id },
+        data: {
+          status: verified ? VerificationServiceChargeStatus.VERIFIED : VerificationServiceChargeStatus.REJECTED,
+          failureReason: rejectionReason,
+          processedAt: new Date(),
+        },
+      });
+      await transaction.kycProfile.update({
+        where: { userId: charge.userId },
+        data: verified
+          ? { status: KycStatus.VERIFIED, ninStatus: KycStatus.VERIFIED, verifiedAt: new Date(), rejectionReason: null }
+          : { status: KycStatus.REJECTED, ninStatus: KycStatus.REJECTED, verifiedAt: null, rejectionReason },
+      });
+    });
+    await this.audit.record({
+      actorUserId: charge.userId,
+      action: verified ? 'kyc.verified_via_dojah' : 'kyc.dojah_verification_rejected',
+      entityType: 'verification_service_charge',
+      entityId: charge.id,
+    });
+    return { status, verified, provider: 'DOJAH' as const, providerReference, serviceFeeKobo: KycService.SERVICE_FEE_KOBO };
+  }
+
+  private assertEmailVerified(emailVerifiedAt: Date | null): void {
+    if (!emailVerifiedAt) throw new ForbiddenException('Verify your email address before starting identity verification');
   }
 
   private hashCode(value: string): string {
@@ -203,15 +356,4 @@ export class KycService {
     return Buffer.concat([decipher.update(buffer.subarray(28)), decipher.final()]).toString('utf8');
   }
 
-  private phoneNumbersMatch(accountPhone: string, nimcPhone: string): boolean {
-    const normalize = (phone: string): string | undefined => {
-      const digits = phone.replace(/\D/g, '');
-      if (/^0\d{10}$/.test(digits)) return digits;
-      if (/^234\d{10}$/.test(digits)) return `0${digits.slice(3)}`;
-      return undefined;
-    };
-    const account = normalize(accountPhone);
-    const nimc = normalize(nimcPhone);
-    return Boolean(account && nimc && account === nimc);
-  }
 }

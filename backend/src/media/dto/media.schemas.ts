@@ -1,8 +1,21 @@
 import { z } from 'zod';
 
-export const createUploadSignatureSchema = z.object({
-  kind: z.enum(['listing', 'maintenance', 'profile', 'incident']),
-  resourceType: z.enum(['image', 'video']).default('image'),
+const uploadKindSchema = z.enum(['listing', 'maintenance', 'profile', 'incident']);
+const mediaTypeSchema = z.enum(['IMAGE', 'VIDEO']);
+
+export const createPresignedUploadSchema = z.object({
+  kind: uploadKindSchema,
+  mediaType: mediaTypeSchema,
+  mimeType: z.string().trim().min(3).max(100),
+  size: z.number().int().positive().max(50 * 1024 * 1024),
+  listingId: z.string().uuid().optional(),
 });
 
-export type CreateUploadSignatureRequest = z.infer<typeof createUploadSignatureSchema>;
+export const deleteUploadSchema = z.object({
+  objectKey: z.string().trim().min(1).max(500),
+});
+
+export type UploadKind = z.infer<typeof uploadKindSchema>;
+export type RequestedMediaType = z.infer<typeof mediaTypeSchema>;
+export type CreatePresignedUploadRequest = z.infer<typeof createPresignedUploadSchema>;
+export type DeleteUploadRequest = z.infer<typeof deleteUploadSchema>;

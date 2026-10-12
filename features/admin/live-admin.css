@@ -1,0 +1,126 @@
+.live-admin-page { max-width: 1180px; }
+.admin-access-state { display: grid; justify-items: center; max-width: 520px; margin: 48px auto; padding: 36px; border: 1px solid var(--line); border-radius: 12px; color: #617269; background: #fff; text-align: center; }
+.admin-access-state svg { color: #1e7250; }
+.admin-access-state h1, .admin-access-state h2 { margin: 14px 0 6px; color: #29483b; }
+.admin-access-state p { max-width: 380px; margin: 0 0 18px; font-size: 12px; line-height: 1.55; }
+.admin-access-state.compact { justify-items: start; max-width: none; margin: 0 0 14px; padding: 17px; text-align: left; }
+.admin-access-state.compact h2 { margin: 7px 0 3px; font-size: 16px; }
+.admin-access-state.compact p { max-width: none; margin: 0; }
+.admin-live-error { display: flex; align-items: center; gap: 6px; margin: 0 0 13px; padding: 11px 13px; border: 1px solid #f0c8c0; border-radius: 8px; color: #a94734; background: #fff5f2; font-size: 10px; }
+.admin-live-error svg { flex: 0 0 auto; }
+.live-queue-preview { padding: 17px; }
+.live-queue-preview .subhead { margin-top: 0; }
+.live-queue-preview article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); }
+.live-queue-preview article > span { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.live-queue-preview article img, .live-queue-preview article i { display: grid; place-items: center; width: 38px; height: 32px; border-radius: 6px; color: #497161; background: #eef4ef; object-fit: cover; }
+.live-queue-preview article b { display: grid; gap: 3px; color: #3b574a; font-size: 10px; }
+.live-queue-preview article small { overflow: hidden; max-width: 620px; color: #84918a; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-live-loading, .admin-live-empty { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 110px; color: #75837b; font-size: 10px; text-align: center; }
+.admin-live-loading svg { animation: admin-spin 1s linear infinite; }
+@keyframes admin-spin { to { transform: rotate(360deg); } }
+.admin-status-tabs { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 13px; }
+.admin-status-tabs button { padding: 8px 11px; border: 1px solid var(--line); border-radius: 999px; color: #718077; background: #fff; font-size: 9px; text-transform: capitalize; }
+.admin-status-tabs button.active { border-color: #338d60; color: #216744; background: #eaf6ed; box-shadow: 0 0 0 2px #d9ecdd; }
+.admin-review-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, .72fr); gap: 13px; align-items: start; }
+.admin-listing-list { overflow: hidden; padding: 0; }
+.admin-listing-list > button { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; gap: 10px; align-items: center; width: 100%; padding: 12px 14px; border: 0; border-top: 1px solid var(--line); color: #435c51; background: #fff; text-align: left; }
+.admin-listing-list > button:first-child { border-top: 0; }
+.admin-listing-list > button:hover, .admin-listing-list > button.active { background: #f2f9f3; }
+.admin-listing-thumbnail { display: grid; place-items: center; width: 58px; height: 50px; border-radius: 7px; color: #42725d; background: #eff5f0; overflow: hidden; }
+.admin-listing-thumbnail img { width: 100%; height: 100%; object-fit: cover; }
+.admin-listing-list > button > span:nth-child(2) { display: grid; gap: 4px; min-width: 0; }
+.admin-listing-list b { overflow: hidden; color: #385448; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-listing-list small { overflow: hidden; color: #7d8d83; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-listing-review { padding: 17px; }
+.admin-review-heading { display: flex; justify-content: space-between; gap: 10px; }
+.admin-review-heading > span { display: grid; gap: 5px; }
+.admin-review-heading small, .admin-review-facts small { color: #84918a; font-size: 8px; font-weight: bold; letter-spacing: .08em; text-transform: uppercase; }
+.admin-review-heading h2 { margin: 0; color: #294a3b; font-size: 17px; }
+.admin-review-heading p { margin: 0; color: #738178; font-size: 9px; line-height: 1.55; }
+.admin-review-heading > button { width: 28px; height: 28px; border: 0; border-radius: 6px; color: #7e8b83; background: #f4f7f4; }
+.admin-review-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin: 15px 0; }
+.admin-review-facts span { display: grid; gap: 4px; padding: 8px; border-radius: 7px; background: #f5f8f5; }
+.admin-review-facts b { color: #4b6257; font-size: 8px; line-height: 1.35; }
+.admin-review-media { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin: 0 0 14px; }
+.admin-review-media img { width: 100%; aspect-ratio: 1.35; border-radius: 6px; object-fit: cover; }
+.admin-note { display: grid; gap: 6px; color: #52685d; font-size: 9px; font-weight: bold; }
+.admin-note textarea { min-height: 84px; padding: 9px; border: 1px solid var(--line); border-radius: 7px; color: #40584b; background: #fff; font: inherit; font-size: 10px; line-height: 1.45; resize: vertical; }
+.admin-review-actions, .admin-profile-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 12px; }
+.admin-review-actions [data-slot=button], .admin-profile-actions [data-slot=button] { font-size: 9px; }
+.admin-readonly-note { margin: 0; padding: 10px; border-radius: 7px; color: #718076; background: #f5f7f5; font-size: 9px; line-height: 1.45; }
+.admin-development-token { display: flex; gap: 9px; margin-bottom: 13px; padding: 12px; border: 1px solid #ead9a7; border-radius: 8px; color: #715712; background: #fffaea; }
+.admin-development-token > svg { flex: 0 0 auto; margin-top: 2px; }
+.admin-development-token span { display: grid; gap: 3px; min-width: 0; }
+.admin-development-token b { font-size: 10px; }
+.admin-development-token code { overflow-wrap: anywhere; color: #5c4a12; font-size: 9px; }
+.admin-development-token small { color: #887735; font-size: 8px; }
+.admin-invite-form { margin-bottom: 13px; padding: 17px; }
+.admin-invite-form .subhead { margin-top: 0; }
+.admin-invite-form .subhead [data-slot=button] { padding: 0; color: #7e8c84; }
+.admin-invite-form .actions { margin-bottom: 0; }
+.admin-live-management { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, .6fr); gap: 13px; align-items: start; }
+.admin-person.selected { background: #eef8f0; box-shadow: inset 3px 0 #388b60; }
+.admin-live-profile { display: grid; align-content: start; justify-items: start; padding: 17px; }
+.admin-profile-avatar { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 11px; border-radius: 13px; color: #fff; background: #215344; font-size: 13px; font-weight: bold; }
+.admin-live-profile h2 { margin: 12px 0 3px; color: #2c493d; font-size: 18px; }
+.admin-live-profile > p { margin: 0; color: #77857d; font-size: 9px; }
+.admin-live-profile dl { width: 100%; margin: 15px 0 0; }
+.admin-live-profile dl div { display: flex; justify-content: space-between; gap: 8px; padding: 9px 0; border-top: 1px solid var(--line); }
+.admin-live-profile dt { color: #829087; font-size: 8px; }
+.admin-live-profile dd { margin: 0; color: #476155; font-size: 8px; text-align: right; text-transform: capitalize; }
+.admin-live-profile .admin-profile-actions { width: 100%; margin-top: 14px; }
+.admin-live-profile .admin-profile-actions [data-slot=button] { flex: 1; }
+.admin-permissions-header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; gap: 12px; margin: 0 0 14px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+.admin-permissions-header label { display: grid; gap: 5px; color: #596d63; font-size: 9px; font-weight: bold; }
+.admin-permissions-header select, .admin-permission-row select { padding: 8px; border: 1px solid var(--line); border-radius: 6px; color: #425b4f; background: #fff; font: inherit; font-size: 9px; }
+.admin-permissions-header > span { display: grid; gap: 5px; align-content: end; }
+.admin-permissions-header > span small { color: #84918a; font-size: 8px; }
+.admin-permissions-header [data-slot=button] { font-size: 9px; }
+.admin-permission-row { justify-content: space-between; }
+.admin-permission-row select { margin-left: auto; min-width: 105px; }
+.admin-transaction-filters { display: flex; gap: 7px; margin-bottom: 13px; }
+.admin-transaction-filters label { display: flex; flex: 1; gap: 7px; align-items: center; min-width: 0; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; color: #708077; background: #fff; }
+.admin-transaction-filters input { width: 100%; height: 34px; min-width: 0; border: 0; outline: 0; color: #3d594c; background: transparent; font: inherit; font-size: 10px; }
+.admin-transaction-filters [data-slot=button] { font-size: 9px; }
+.admin-transaction-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(310px, .75fr); gap: 13px; align-items: start; }
+.admin-transaction-list { overflow: hidden; padding: 0; }
+.admin-transaction-list > button { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 9px; align-items: center; width: 100%; padding: 12px 14px; border: 0; border-top: 1px solid var(--line); color: #4a6c5c; background: #fff; text-align: left; }
+.admin-transaction-list > button:first-child { border-top: 0; }
+.admin-transaction-list > button:hover, .admin-transaction-list > button.active { background: #f0f8f2; }
+.admin-transaction-list > button > span:nth-child(2) { display: grid; gap: 4px; min-width: 0; }
+.admin-transaction-list > button > span:last-child { display: grid; justify-items: end; gap: 5px; }
+.admin-transaction-list b { overflow: hidden; color: #3d594c; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-transaction-list small { overflow: hidden; color: #849188; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-transaction-reference { color: #287250 !important; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.admin-transaction-detail { padding: 17px; }
+.admin-transaction-detail code { overflow-wrap: anywhere; color: #2c6f4e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
+.admin-transaction-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin: 15px 0; }
+.admin-transaction-facts div { display: grid; gap: 4px; min-width: 0; padding: 8px; border-radius: 7px; background: #f5f8f5; }
+.admin-transaction-facts dt { color: #849188; font-size: 8px; text-transform: uppercase; }
+.admin-transaction-facts dd { overflow: hidden; margin: 0; color: #476054; font-size: 9px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.admin-transaction-audit { margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--line); }
+.admin-transaction-audit h3 { margin: 0 0 7px; color: #3d594c; font-size: 11px; }
+.admin-transaction-audit p { margin: 0; color: #819087; font-size: 9px; }
+.admin-transaction-audit ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.admin-transaction-audit li { display: flex; justify-content: space-between; gap: 9px; align-items: center; padding: 7px 0; border-top: 1px solid #edf1ed; }
+.admin-transaction-audit li > span { display: grid; gap: 3px; min-width: 0; }
+.admin-transaction-audit li b { color: #486155; font-size: 9px; }
+.admin-transaction-audit li small { color: #839087; font-size: 8px; }
+.admin-refund-form { display: grid; gap: 8px; margin-top: 14px; padding: 12px; border: 1px solid #e6d8b5; border-radius: 8px; background: #fffaf0; }
+.admin-refund-form h3 { margin: 0; color: #5d4b20; font-size: 11px; }
+.admin-refund-form > p { margin: 0; color: #766331; font-size: 9px; line-height: 1.45; }
+.admin-refund-form > div { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.admin-refund-form label { display: grid; gap: 5px; color: #675a3c; font-size: 8px; font-weight: bold; }
+.admin-refund-form input, .admin-refund-form select, .admin-refund-form textarea { width: 100%; border: 1px solid #e0d1aa; border-radius: 6px; color: #4e4939; background: #fff; font: inherit; font-size: 9px; font-weight: normal; }
+.admin-refund-form input, .admin-refund-form select { height: 33px; padding: 0 7px; }
+.admin-refund-form textarea { min-height: 58px; padding: 7px; resize: vertical; }
+.admin-refund-form [data-slot=button] { justify-self: start; font-size: 9px; }
+.admin-caution-settlements { display: grid; gap: 8px; }
+.admin-caution-settlements article { display: grid; gap: 8px; padding: 9px; border: 1px solid #e5ece6; border-radius: 7px; background: #fafdfa; }
+.admin-caution-settlements article > span { display: grid; gap: 3px; }
+.admin-caution-settlements article > div { display: grid; gap: 7px; padding-top: 8px; border-top: 1px solid #edf2ee; }
+.admin-caution-settlements article > div > span { display: flex; flex-wrap: wrap; gap: 7px; }
+.admin-caution-settlements article textarea { min-height: 52px; padding: 7px; border: 1px solid #d7e3d9; border-radius: 6px; color: #40584c; background: #fff; font: inherit; font-size: 9px; font-weight: 400; resize: vertical; }
+.admin-caution-settlements [data-slot=button] { font-size: 8px; }
+@media (max-width: 850px) { .admin-review-layout, .admin-live-management, .admin-transaction-layout { grid-template-columns: 1fr; } .admin-permissions-header { grid-template-columns: 1fr 1fr; } .admin-permissions-header [data-slot=button] { grid-column: 1 / -1; } }
+@media (max-width: 600px) { .live-queue-preview article small { max-width: 190px; } .admin-review-facts, .admin-transaction-facts, .admin-refund-form > div { grid-template-columns: 1fr; } .admin-listing-list > button { grid-template-columns: 48px minmax(0, 1fr); } .admin-listing-list > button > .status { grid-column: 2; justify-self: start; } .admin-listing-thumbnail { width: 48px; height: 43px; } .admin-permissions-header { grid-template-columns: 1fr; } .admin-review-actions, .admin-profile-actions, .admin-transaction-filters { flex-direction: column; } .admin-transaction-filters [data-slot=button] { width: 100%; } .admin-transaction-list > button { grid-template-columns: 22px minmax(0, 1fr); } .admin-transaction-list > button > span:last-child { grid-column: 2; justify-items: start; grid-auto-flow: column; justify-content: start; } }

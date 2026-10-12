@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { Prisma, RoleCode, User, UserStatus } from '@prisma/client';
 import { PrismaService } from '../common/database/prisma.service';
 
@@ -71,6 +71,13 @@ export class UsersService {
   async assertCanAuthenticate(user: Pick<User, 'status'>): Promise<void> {
     if (user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException('This account is not active');
+    }
+  }
+
+  async assertEmailVerified(userId: string): Promise<void> {
+    const user = await this.findByIdOrThrow(userId);
+    if (!user.emailVerifiedAt) {
+      throw new ForbiddenException('Verify your email address before continuing');
     }
   }
 

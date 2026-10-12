@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { KycStatus, ListingStatus, PermissionEffect, Prisma, RoleCode, UserStatus } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
@@ -6,10 +6,14 @@ import { PasswordService } from '../common/auth/password.service';
 import { AuditService } from '../common/database/audit.service';
 import { pageResult } from '../common/http/pagination';
 import { PrismaService } from '../common/database/prisma.service';
+import { RedisService } from '../common/redis/redis.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UsersService } from '../users/users.service';
 import {
   AcceptAdminInvitationRequest,
+  AdminListingQuery,
+  AdminMaintenanceQuery,
+  AdminTransactionQuery,
   AdminUserQuery,
   AssignRoleRequest,
   CreateAdminInvitationRequest,
@@ -18,6 +22,80 @@ import {
   UpdatePermissionsRequest,
   UpdateUserStatusRequest,
 } from './dto/admin.schemas';
+
+const adminListingInclude = {
+  media: { orderBy: [{ mediaType: 'asc' as const }, { position: 'asc' as const }] },
+  landlord: { select: { id: true, firstName: true, lastName: true, profileImageUrl: true } },
+  managingAgent: { select: { id: true, firstName: true, lastName: true, profileImageUrl: true } },
+  _count: { select: { savedBy: true, applications: true, maintenanceRequests: true } },
+} satisfies Prisma.ListingInclude;
+
+// Do not include provider payloads here. They can contain payment-provider data
+// that is unnecessary for operational tracing. References, amounts, statuses and
+// ledger movements are sufficient for authorized financial staff.
+const adminTransactionInclude = {
+  listing: { select: { id: true, slug: true, title: true, source: true } },
+  application: { select: { id: true, status: true, moveInDate: true, leaseMonths: true } },
+  tenant: { select: { id: true, firstName: true, lastName: true, email: true } },
+  landlord: { select: { id: true, firstName: true, lastName: true, email: true } },
+  agent: { select: { id: true, firstName: true, lastName: true, email: true } },
+  escrow: {
+    select: {
+      id: true,
+      status: true,
+      cautionStatus: true,
+      rentHeldKobo: true,
+      cautionHeldKobo: true,
+      releaseAuthorizedAt: true,
+      releasedAt: true,
+      cautionDeductions: {
+        select: {
+          id: true,
+          amountKobo: true,
+          reason: true,
+          evidence: true,
+          proposedByUserId: true,
+          acceptedAt: true,
+          disputedAt: true,
+          resolvedAt: true,
+          resolution: true,
+          resolutionNote: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' as const },
+      },
+    },
+  },
+  payouts: {
+    select: {
+      id: true,
+      recipientUserId: true,
+      kind: true,
+      status: true,
+      amountKobo: true,
+      serviceFeeKobo: true,
+      providerReference: true,
+      scheduledAt: true,
+      paidAt: true,
+      createdAt: true,
+      recipient: { select: { id: true, firstName: true, lastName: true, email: true } },
+    },
+    orderBy: { createdAt: 'asc' as const },
+  },
+  ledgerEntries: {
+    select: { id: true, entryType: true, debitAccount: true, creditAccount: true, amountKobo: true, currency: true, createdAt: true },
+    orderBy: { createdAt: 'asc' as const },
+  },
+} satisfies Prisma.PaymentInclude;
+
+const adminMaintenanceInclude = {
+  listing: { select: { id: true, slug: true, title: true } },
+  reporter: { select: { id: true, firstName: true, lastName: true } },
+  landlord: { select: { id: true, firstName: true, lastName: true } },
+  agent: { select: { id: true, firstName: true, lastName: true } },
+  assignedTo: { select: { id: true, firstName: true, lastName: true } },
+  _count: { select: { updates: true, attachments: true } },
+} satisfies Prisma.MaintenanceRequestInclude;
 
 @Injectable()
 export class AdminService {
@@ -28,6 +106,7 @@ export class AdminService {
     private readonly audit: AuditService,
     private readonly notificationsService: NotificationsService,
     private readonly configService: ConfigService,
+    private readonly redis: RedisService,
   ) {}
 
   async listUsers(query: AdminUserQuery) {
@@ -58,6 +137,85 @@ export class AdminService {
       this.prisma.user.count({ where }),
     ]);
     return pageResult(items, total, query);
+  }
+
+  async listListings(query: AdminListingQuery) {
+    const where: Prisma.ListingWhereInput = { status: query.status };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.listing.findMany({
+        where,
+        include: adminListingInclude,
+        orderBy: { updatedAt: 'asc' },
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+      }),
+      this.prisma.listing.count({ where }),
+    ]);
+    return pageResult(items, total, query);
+  }
+
+  async listTransactions(query: AdminTransactionQuery) {
+    const search = query.search;
+    const where: Prisma.PaymentWhereInput = {
+      status: query.status,
+      OR: search
+        ? [
+            { reference: { contains: search, mode: 'insensitive' } },
+            { providerReference: { contains: search, mode: 'insensitive' } },
+            { listing: { title: { contains: search, mode: 'insensitive' } } },
+            { tenant: { is: { OR: [{ firstName: { contains: search, mode: 'insensitive' } }, { lastName: { contains: search, mode: 'insensitive' } }, { email: { contains: search, mode: 'insensitive' } }] } } },
+            { landlord: { is: { OR: [{ firstName: { contains: search, mode: 'insensitive' } }, { lastName: { contains: search, mode: 'insensitive' } }, { email: { contains: search, mode: 'insensitive' } }] } } },
+            { agent: { is: { OR: [{ firstName: { contains: search, mode: 'insensitive' } }, { lastName: { contains: search, mode: 'insensitive' } }, { email: { contains: search, mode: 'insensitive' } }] } } },
+            { payouts: { some: { providerReference: { contains: search, mode: 'insensitive' } } } },
+          ]
+        : undefined,
+    };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.payment.findMany({
+        where,
+        include: adminTransactionInclude,
+        orderBy: { createdAt: 'desc' },
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+      }),
+      this.prisma.payment.count({ where }),
+    ]);
+    return pageResult(items.map((item) => ({ ...item, transactionReference: item.reference })), total, query);
+  }
+
+  async listMaintenance(query: AdminMaintenanceQuery) {
+    const where: Prisma.MaintenanceRequestWhereInput = { status: query.status };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.maintenanceRequest.findMany({
+        where,
+        include: adminMaintenanceInclude,
+        orderBy: [{ priority: 'desc' }, { updatedAt: 'desc' }],
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+      }),
+      this.prisma.maintenanceRequest.count({ where }),
+    ]);
+    return pageResult(items, total, query);
+  }
+
+  /** Operational health without exposing credential material or provider secrets. */
+  async systemStates() {
+    const checkedAt = new Date().toISOString();
+    const [database, redis] = await Promise.all([
+      this.prisma.$queryRawUnsafe('SELECT 1').then(() => 'operational' as const).catch(() => 'unavailable' as const),
+      this.redis.client.ping().then((reply) => reply === 'PONG' ? 'operational' as const : 'unavailable' as const).catch(() => 'unavailable' as const),
+    ]);
+    return {
+      checkedAt,
+      api: 'operational' as const,
+      database,
+      redis,
+      integrations: {
+        paystack: this.configService.get<string>('PAYSTACK_SECRET_KEY') ? 'configured' as const : 'not_configured' as const,
+        dojah: this.configService.get<string>('DOJAH_APP_ID') && this.configService.get<string>('DOJAH_SECRET_KEY') ? 'configured' as const : 'not_configured' as const,
+        r2: this.configService.get<string>('CLOUDFLARE_R2_BUCKET_NAME') && this.configService.get<string>('CLOUDFLARE_R2_PUBLIC_URL') ? 'configured' as const : 'not_configured' as const,
+      },
+    };
   }
 
   async updateUserStatus(actorId: string, userId: string, input: UpdateUserStatusRequest) {
@@ -195,10 +353,17 @@ export class AdminService {
     if (!listing) {
       throw new NotFoundException('Listing not found');
     }
-    const status = action === 'approve' ? ListingStatus.PUBLISHED : action === 'reject' ? ListingStatus.REJECTED : ListingStatus.SUSPENDED;
+    if (action !== 'suspend') {
+      throw new BadRequestException('Listings are published automatically and no longer require approval or rejection.');
+    }
+    if (listing.status !== ListingStatus.PUBLISHED) {
+      throw new BadRequestException('Only published listings can be suspended');
+    }
+    const status = ListingStatus.SUSPENDED;
     const updated = await this.prisma.listing.update({
       where: { id: listingId },
-      data: { status, publishedAt: action === 'approve' ? new Date() : listing.publishedAt, moderatedByUserId: actorId, moderationNote: input.note },
+      data: { status, publishedAt: listing.publishedAt, moderatedByUserId: actorId, moderationNote: input.note },
+      include: adminListingInclude,
     });
     const recipients = [listing.landlordId, listing.managingAgentId, listing.createdById].filter((id): id is string => Boolean(id));
     await Promise.all(

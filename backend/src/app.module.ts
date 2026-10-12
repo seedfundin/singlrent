@@ -32,7 +32,6 @@ import { TenanciesModule } from './tenancies/tenancies.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { IncidentsModule } from './incidents/incidents.module';
 import { DashboardModule } from './dashboard/dashboard.module';
-import { GeocodingModule } from './geocoding/geocoding.module';
 
 @Module({
   imports: [
@@ -60,7 +59,6 @@ import { GeocodingModule } from './geocoding/geocoding.module';
     ReviewsModule,
     IncidentsModule,
     DashboardModule,
-    GeocodingModule,
   ],
   controllers: [AppController],
   providers: [

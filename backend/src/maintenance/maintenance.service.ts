@@ -45,7 +45,7 @@ export class MaintenanceService {
       throw new ForbiddenException('Maintenance requests require an active tenancy for this home');
     }
     for (const attachment of input.attachments) {
-      this.mediaService.assertOwnedPublicId(attachment.publicId, reporterId, 'maintenance');
+      this.mediaService.assertOwnedObjectKey(attachment.publicId, reporterId, 'maintenance');
     }
     const request = await this.prisma.maintenanceRequest.create({
       data: {

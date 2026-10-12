@@ -82,8 +82,11 @@ export class DashboardService {
   }
 
   private async adminMetrics() {
-    const [users, listingsPendingReview, payments, maintenanceOpen, platformRevenue, agentCommissions] = await Promise.all([
+    const [users, administrators, listingsPendingReview, payments, maintenanceOpen, platformRevenue, agentCommissions] = await Promise.all([
       this.prisma.user.count(),
+      this.prisma.user.count({
+        where: { userRoles: { some: { role: { code: { in: [RoleCode.ADMIN, RoleCode.SUPER_ADMIN] } } } } },
+      }),
       this.prisma.listing.count({ where: { status: ListingStatus.PENDING_REVIEW } }),
       this.prisma.payment.count({ where: { status: PaymentStatus.SUCCESS } }),
       this.prisma.maintenanceRequest.count({ where: { status: { in: ['OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS'] } } }),
@@ -92,6 +95,7 @@ export class DashboardService {
     ]);
     return {
       users,
+      administrators,
       listingsPendingReview,
       successfulPayments: payments,
       maintenanceOpen,

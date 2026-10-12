@@ -63,6 +63,34 @@ enum KycStatus {
   REJECTED
 }
 
+// This is separate from a tenant's transactional KYC. It is the one-time
+// verification an account must complete before it can publish a property.
+enum PublisherVerificationMethod {
+  NIN
+  BVN
+}
+
+enum PublisherVerificationStatus {
+  NOT_STARTED
+  PENDING
+  VERIFIED
+  REJECTED
+  FAILED
+}
+
+enum VerificationServiceChargeSource {
+  TENANT_PAYMENT
+  PAYOUT_DEDUCTION
+}
+
+enum VerificationServiceChargeStatus {
+  PENDING_PAYMENT
+  PROCESSING
+  VERIFIED
+  REJECTED
+  FAILED
+}
+
 enum ListingStatus {
   DRAFT
   PENDING_REVIEW
@@ -81,6 +109,11 @@ enum ListingAvailability {
 enum ListingSource {
   LANDLORD
   AGENT
+}
+
+enum ListingMediaType {
+  IMAGE
+  VIDEO
 }
 
 enum PropertyType {
@@ -143,9 +176,15 @@ enum CautionStatus {
   REFUNDED
 }
 
+enum CautionDeductionOutcome {
+  LANDLORD_PAID
+  TENANT_REFUND
+}
+
 enum PayoutKind {
   LANDLORD
   AGENT
+  CAUTION_DEDUCTION
   CAUTION_REFUND
   REFUND
 }
@@ -181,6 +220,7 @@ enum LedgerEntryType {
   PAYOUT_COMPLETED
   PAYMENT_REVERSED
   REFUND_ISSUED
+  KYC_SERVICE_FEE_ALLOCATED
 }
 
 enum MaintenanceCategory {
@@ -209,6 +249,7 @@ enum MaintenanceStatus {
 
 enum ConversationType {
   LISTING_ENQUIRY
+  PROPERTY_AI
   TENANCY
   SUPPORT
 }
@@ -297,13 +338,17 @@ model User {
   createdAt               DateTime                   @default(now())
   updatedAt               DateTime                   @updatedAt
   kyc                     KycProfile?
+  publisherVerification   PublisherVerification?
   tenantProfile           TenantProfile?
   landlordProfile         LandlordProfile?
   agentProfile            AgentProfile?
+  payoutAccount           PayoutAccount?
   userRoles               UserRole[]
   directPermissions       UserPermission[]
   refreshTokens           RefreshToken[]
+  emailChallenges         EmailVerificationChallenge[]
   phoneChallenges         PhoneVerificationChallenge[]
+  verificationServiceCharges VerificationServiceCharge[]
   savedListings           SavedListing[]
   listingsOwned           Listing[]                  @relation("ListingLandlord")
   listingsCreated         Listing[]                  @relation("ListingCreator")
@@ -361,6 +406,27 @@ model KycProfile {
   @@map("kyc_profiles")
 }
 
+model PublisherVerification {
+  id                       String                      @id @default(uuid()) @db.Uuid
+  userId                   String                      @unique @db.Uuid
+  method                   PublisherVerificationMethod?
+  status                   PublisherVerificationStatus @default(NOT_STARTED)
+  providerReference        String?                     @unique @db.VarChar(255)
+  providerVerificationType String?                     @db.VarChar(100)
+  providerStatus           String?                     @db.VarChar(100)
+  livenessVerified         Boolean                     @default(false)
+  failureReason            String?                     @db.VarChar(1000)
+  requestedAt              DateTime?
+  completedAt              DateTime?
+  verifiedAt               DateTime?
+  createdAt                DateTime                    @default(now())
+  updatedAt                DateTime                    @updatedAt
+  user                     User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, requestedAt])
+  @@map("publisher_verifications")
+}
+
 model TenantProfile {
   userId             String   @id @db.Uuid
   occupation         String?  @db.VarChar(150)
@@ -395,6 +461,27 @@ model AgentProfile {
   @@map("agent_profiles")
 }
 
+// The raw bank-account number is deliberately never stored. Paystack returns a
+// recipient code after validating the destination; that code plus the masked
+// display fields are all SingleRent needs for future transfers and refunds.
+model PayoutAccount {
+  id            String          @id @default(uuid()) @db.Uuid
+  userId        String          @unique @db.Uuid
+  provider      PaymentProvider @default(PAYSTACK)
+  recipientCode String          @unique @db.VarChar(255)
+  bankCode      String          @db.VarChar(32)
+  bankName      String          @db.VarChar(180)
+  accountName   String          @db.VarChar(255)
+  accountLast4  String          @db.Char(4)
+  currency      String          @default("NGN") @db.Char(3)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([provider, recipientCode])
+  @@map("payout_accounts")
+}
+
 model PhoneVerificationChallenge {
   id          String   @id @default(uuid()) @db.Uuid
   userId      String   @db.Uuid
@@ -408,6 +495,21 @@ model PhoneVerificationChallenge {
 
   @@index([userId, expiresAt])
   @@map("phone_verification_challenges")
+}
+
+model EmailVerificationChallenge {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  email       String   @db.VarChar(320)
+  codeHash    String   @db.Char(64)
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  attempts    Int      @default(0)
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("email_verification_challenges")
 }
 
 model Role {
@@ -528,7 +630,7 @@ model Listing {
   landlord              User                @relation("ListingLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
   createdBy             User                @relation("ListingCreator", fields: [createdById], references: [id], onDelete: Restrict)
   managingAgent         User?               @relation("ListingAgent", fields: [managingAgentId], references: [id], onDelete: SetNull)
-  images                ListingImage[]
+  media                 ListingMedia[]
   savedBy               SavedListing[]
   applications          RentalApplication[]
   tenancies             Tenancy[]
@@ -545,22 +647,24 @@ model Listing {
   @@map("listings")
 }
 
-model ListingImage {
-  id          String   @id @default(uuid()) @db.Uuid
-  listingId   String   @db.Uuid
-  url         String   @db.Text
-  publicId    String   @unique @db.VarChar(255)
-  altText     String?  @db.VarChar(255)
-  format      String?  @db.VarChar(30)
+model ListingMedia {
+  id          String           @id @default(uuid()) @db.Uuid
+  listingId   String           @db.Uuid
+  url         String           @db.Text
+  objectKey   String           @unique @db.VarChar(500)
+  mediaType   ListingMediaType
+  altText     String?          @db.VarChar(255)
+  mimeType    String           @db.VarChar(100)
   width       Int?
   height      Int?
   bytes       Int?
-  position    Int      @default(0)
-  createdAt   DateTime @default(now())
-  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  position    Int              @default(0)
+  createdAt   DateTime         @default(now())
+  listing     Listing          @relation(fields: [listingId], references: [id], onDelete: Cascade)
 
   @@index([listingId, position])
-  @@map("listing_images")
+  @@index([listingId, mediaType])
+  @@map("listing_media")
 }
 
 model SavedListing {
@@ -696,6 +800,7 @@ model CautionDeduction {
   acceptedAt      DateTime?
   disputedAt      DateTime?
   resolvedAt      DateTime?
+  resolution      CautionDeductionOutcome?
   resolutionNote  String?  @db.VarChar(1000)
   createdAt       DateTime @default(now())
   escrowRecord    EscrowRecord @relation(fields: [escrowRecordId], references: [id], onDelete: Cascade)
@@ -729,6 +834,7 @@ model Payout {
   kind              PayoutKind
   status            PayoutStatus @default(PENDING)
   amountKobo        BigInt
+  serviceFeeKobo    BigInt       @default(0)
   providerReference String?      @unique @db.VarChar(150)
   failureReason     String?      @db.VarChar(1000)
   scheduledAt       DateTime?
@@ -737,10 +843,37 @@ model Payout {
   updatedAt         DateTime     @updatedAt
   payment           Payment      @relation(fields: [paymentId], references: [id], onDelete: Restrict)
   recipient         User         @relation("PayoutRecipient", fields: [recipientUserId], references: [id], onDelete: Restrict)
+  verificationServiceCharges VerificationServiceCharge[]
 
   @@index([recipientUserId, status])
   @@index([paymentId, kind])
   @@map("payouts")
+}
+
+model VerificationServiceCharge {
+  id                String                          @id @default(uuid()) @db.Uuid
+  userId            String                          @db.Uuid
+  payoutId          String?                         @db.Uuid
+  source            VerificationServiceChargeSource
+  status            VerificationServiceChargeStatus @default(PENDING_PAYMENT)
+  amountKobo        BigInt                          @default(10000)
+  currency          String                          @default("NGN") @db.Char(3)
+  paystackReference String?                         @unique @db.VarChar(150)
+  providerReference String?                         @unique @db.VarChar(255)
+  ninCiphertext     String                          @db.Text
+  ninLast4          String                          @db.Char(4)
+  providerPayload   Json?
+  failureReason     String?                         @db.VarChar(1000)
+  paidAt            DateTime?
+  processedAt       DateTime?
+  createdAt         DateTime                        @default(now())
+  updatedAt         DateTime                        @updatedAt
+  user              User                            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payout            Payout?                         @relation(fields: [payoutId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status, createdAt])
+  @@index([payoutId, createdAt])
+  @@map("verification_service_charges")
 }
 
 model WebhookEvent {

@@ -8,12 +8,10 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronRight,
-  CircleAlert,
   FileText,
   Heart,
   Home,
   House,
-  Landmark,
   LayoutDashboard,
   LogOut,
   MapPin,
@@ -21,7 +19,6 @@ import {
   MoreHorizontal,
   Search,
   Settings,
-  ShieldCheck,
   UserRound,
   Users,
   WalletCards,
@@ -31,12 +28,6 @@ import { Button } from "@/components/ui/button";
 import { useAppSession } from "@/features/app/app-provider";
 import type { ApiSession } from "@/lib/api";
 import type { View } from "@/lib/routes";
-
-export const photos = {
-  building: "https://images.nigeriapropertycentre.com/properties/images/3294165/0696896bc6e46e-fully-service-2bedroom-apartment-for-rent-lekki-lagos.jpg",
-  living: "https://d1o88e3pxnk9ri.cloudfront.net/uploads/property/DEC2024/0223758001733920118-property-DEC2024.jpeg",
-  suite: "https://images.trvl-media.com/lodging/112000000/111750000/111748200/111748150/93d43aff.jpg?impolicy=resizecrop&ra=fill&rh=575&rw=575",
-};
 
 export type Navigate = (view: View, query?: Record<string, string>) => void;
 
@@ -59,7 +50,7 @@ export function Status({
   return <span className={`status ${tone}`}>{children}</span>;
 }
 
-export function Img({ src = photos.living, alt = "Property" }: { src?: string; alt?: string }) {
+export function Img({ src, alt = "Property" }: { src: string; alt?: string }) {
   return <img className="img" src={src} alt={alt} referrerPolicy="no-referrer" />;
 }
 
@@ -149,15 +140,15 @@ export function Shell({
   children: ReactNode;
 }) {
   const { session, signOut } = useAppSession();
-  const displayName = session ? `${session.user.firstName} ${session.user.lastName}`.trim() : "Guest";
+  const displayName = session ? `${session.user.firstName} ${session.user.lastName}`.trim() : "Not signed in";
   const initials = session ? `${session.user.firstName.charAt(0)}${session.user.lastName.charAt(0)}`.toUpperCase() : "SR";
   const items = role === "tenant"
-    ? [["Overview", "tenant", LayoutDashboard], ["Saved homes", "saved-homes", Heart], ["Applications", "apply", FileText], ["Payments", "payment", WalletCards], ["Messages", "assistant", MessageCircle], ["Maintenance", "maintenance", Wrench]]
+    ? [["Overview", "tenant", LayoutDashboard], ["Saved homes", "saved-homes", Heart], ["Applications", "tenant-applications", FileText], ["Payments", "transactions", WalletCards], ["Messages", "assistant", MessageCircle], ["Maintenance", "maintenance", Wrench]]
     : role === "landlord"
-      ? [["Overview", "landlord", LayoutDashboard], ["My homes", "landlord-homes", Building2], ["Applications", "apply", FileText], ["Questions", "questions", MessageCircle], ["Payouts", "escrow", WalletCards]]
+      ? [["Overview", "landlord", LayoutDashboard], ["My homes", "landlord-homes", Building2], ["Applications", "landlord-applications", FileText], ["Questions", "questions", MessageCircle], ["Transactions", "landlord-transactions", WalletCards]]
       : role === "agent"
-        ? [["Overview", "agent", LayoutDashboard], ["Managed homes", "agent-homes", Building2], ["Applications", "apply", FileText], ["Enquiries", "assistant", MessageCircle], ["Fees", "pricing", WalletCards]]
-        : [["Overview", "admin", LayoutDashboard], ["KYC reviews", "kyc", ShieldCheck], ["Property approvals", "wizard", Building2], ["Rentals", "apply", FileText], ["Escrow", "escrow", Landmark], ["Disputes", "states", CircleAlert], ["Admin management", "admins", Users]];
+        ? [["Overview", "agent", LayoutDashboard], ["Managed homes", "agent-homes", Building2], ["Applications", "agent-applications", FileText], ["Enquiries", "assistant", MessageCircle], ["Transactions", "agent-transactions", WalletCards]]
+        : [["Overview", "admin", LayoutDashboard], ["Transactions", "admin-transactions", WalletCards], ["Property moderation", "admin-listings", Building2], ["Admin management", "admins", Users]];
 
   return (
     <div className="shell">
@@ -169,7 +160,7 @@ export function Shell({
           <button onClick={() => go("notifications")}><Settings size={17} /> Settings</button>
           <div className="profile">
             <i>{initials}</i>
-            <span><b>{displayName}</b><small>{session ? role : "not signed in"}</small></span>
+            <button className="profile-details" onClick={() => go("profile")} disabled={!session}><b>{displayName}</b><small>{session ? role : "not signed in"}</small></button>
             {session ? <button className="profile-signout" onClick={() => void signOut()} aria-label="Sign out"><LogOut size={15} /></button> : <MoreHorizontal size={15} />}
           </div>
         </div>
@@ -177,9 +168,9 @@ export function Shell({
       <main>
         <div className="app-head">
           <span>Workspace <ChevronRight size={13} /><b>{title}</b></span>
-          <div><Button variant="ghost" size="icon"><Bell size={17} /></Button><Button variant="outline" size="sm"><CalendarDays size={14} /> Sep 2026 <ChevronDown size={13} /></Button></div>
+          <div><Button variant="ghost" size="icon" aria-label="Notifications" onClick={() => go("notifications")}><Bell size={17} /></Button><Button variant="outline" size="sm"><CalendarDays size={14} /> {new Intl.DateTimeFormat("en-NG", { month: "short", year: "numeric" }).format(new Date())} <ChevronDown size={13} /></Button></div>
         </div>
-        <div className="mobile-title"><Brand go={go} /><span>{role} workspace</span><Bell size={17} /></div>
+        <div className="mobile-title"><Brand go={go} /><span>{role} workspace</span><button onClick={() => go("notifications")} aria-label="Notifications"><Bell size={17} /></button></div>
         {children}
         <div className="mobile-nav">
           <button onClick={() => go(role === "tenant" ? "tenant" : role === "landlord" ? "landlord" : role === "agent" ? "agent" : "admin")}><Home size={17} />Home</button>

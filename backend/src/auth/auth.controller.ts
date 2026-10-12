@@ -17,6 +17,8 @@ import {
   refreshSchema,
   RegisterRequest,
   registerSchema,
+  ConfirmEmailVerificationRequest,
+  confirmEmailVerificationSchema,
 } from './dto/auth.schemas';
 
 @ApiTags('Authentication')
@@ -84,5 +86,24 @@ export class AuthController {
   @ApiOperation({ summary: 'Return the authenticated user' })
   me(@CurrentUser() currentUser: AuthenticatedUser): Promise<AuthSession['user']> {
     return this.authService.me(currentUser);
+  }
+
+  @Post('email-verification')
+  @HttpCode(200)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Confirm the email OTP issued after registration' })
+  confirmEmailVerification(
+    @CurrentUser() currentUser: AuthenticatedUser,
+    @Body(new ZodValidationPipe(confirmEmailVerificationSchema)) input: ConfirmEmailVerificationRequest,
+  ) {
+    return this.authService.confirmEmailVerification(currentUser, input);
+  }
+
+  @Post('email-verification/resend')
+  @HttpCode(200)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Issue a replacement email verification OTP' })
+  resendEmailVerification(@CurrentUser() currentUser: AuthenticatedUser) {
+    return this.authService.resendEmailVerification(currentUser);
   }
 }

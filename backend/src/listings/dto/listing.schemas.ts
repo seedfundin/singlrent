@@ -1,16 +1,12 @@
-import { ListingAvailability, ListingStatus, PropertyType } from '@prisma/client';
+import { ListingAvailability, ListingMediaType, ListingStatus, PropertyType } from '@prisma/client';
 import { z } from 'zod';
 import { paginationQuerySchema } from '../../common/http/pagination';
 
 const moneySchema = z.string().regex(/^\d+$/).max(18);
-const imageSchema = z.object({
-  url: z.string().url().max(2000),
-  publicId: z.string().trim().min(1).max(255),
+const listingMediaSchema = z.object({
+  objectKey: z.string().trim().min(1).max(500),
+  mediaType: z.nativeEnum(ListingMediaType),
   altText: z.string().trim().max(255).optional(),
-  format: z.string().trim().max(30).optional(),
-  width: z.number().int().positive().optional(),
-  height: z.number().int().positive().optional(),
-  bytes: z.number().int().positive().optional(),
   position: z.number().int().min(0).max(100).optional(),
 });
 
@@ -32,13 +28,16 @@ const listingPayload = z.object({
   rules: z.record(z.union([z.string().max(250), z.boolean(), z.number().int()])).optional(),
   availableFrom: z.string().datetime().optional(),
   minimumLeaseMonths: z.number().int().min(1).max(36).default(12),
-  images: z.array(imageSchema).max(30).optional(),
+  media: z.array(listingMediaSchema).max(5).optional(),
 });
 
 export const createListingSchema = listingPayload.extend({
   landlordId: z.string().uuid().optional(),
 });
-export const updateListingSchema = listingPayload.partial();
+export const updateListingSchema = listingPayload.partial().refine(
+  (input) => Object.keys(input).length > 0,
+  { message: 'Provide at least one listing field to update' },
+);
 export const listingQuerySchema = paginationQuerySchema.extend({
   state: z.string().trim().max(100).optional(),
   area: z.string().trim().max(150).optional(),

@@ -25,9 +25,21 @@ export class ListingsController {
   }
 
   @ApiBearerAuth()
+  @Get('mine/:idOrSlug')
+  managedDetail(@CurrentUser() user: AuthenticatedUser, @Param('idOrSlug') idOrSlug: string) {
+    return this.listingsService.getManagedById(user.userId, idOrSlug);
+  }
+
+  @ApiBearerAuth()
   @Get('saved')
   saved(@CurrentUser() user: AuthenticatedUser, @Query(new ZodValidationPipe(listingQuerySchema)) query: ListingQuery) {
     return this.listingsService.saved(user.userId, query);
+  }
+
+  @Public()
+  @Get(':idOrSlug/pricing')
+  pricing(@Param('idOrSlug') idOrSlug: string) {
+    return this.listingsService.publicPricing(idOrSlug);
   }
 
   @Public()
@@ -53,9 +65,28 @@ export class ListingsController {
   }
 
   @ApiBearerAuth()
+  @Post(':listingId/publish')
+  publish(@CurrentUser() user: AuthenticatedUser, @Param('listingId') listingId: string) {
+    return this.listingsService.publish(user.userId, listingId);
+  }
+
+  @ApiBearerAuth()
   @Post(':listingId/submit')
-  submit(@CurrentUser() user: AuthenticatedUser, @Param('listingId') listingId: string) {
-    return this.listingsService.submitForReview(user.userId, listingId);
+  submitLegacy(@CurrentUser() user: AuthenticatedUser, @Param('listingId') listingId: string) {
+    // Kept for compatibility with older clients. It now publishes an eligible
+    // saved listing immediately instead of adding it to an admin queue.
+    return this.listingsService.publish(user.userId, listingId);
+  }
+
+  @ApiBearerAuth()
+  @Delete(':listingId/media/:mediaId')
+  @HttpCode(204)
+  async removeMedia(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('listingId') listingId: string,
+    @Param('mediaId') mediaId: string,
+  ): Promise<void> {
+    await this.listingsService.removeMedia(user.userId, listingId, mediaId);
   }
 
   @ApiBearerAuth()

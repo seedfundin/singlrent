@@ -25,12 +25,31 @@ export class IncidentsService {
 
   async create(reporterId: string, input: CreateIncidentRequest): Promise<IncidentView> {
     if (input.listingId) {
-      const listing = await this.prisma.listing.findUnique({ where: { id: input.listingId }, select: { id: true } });
-      if (!listing) {
-        throw new NotFoundException('Listing not found');
+      const listing = await this.prisma.listing.findUnique({
+        where: { id: input.listingId },
+        select: { id: true, landlordId: true, managingAgentId: true, createdById: true },
+      });
+      if (!listing) throw new NotFoundException('Listing not found');
+
+      // A listing-linked concern must be traceable to a real relationship. The
+      // report UI only offers a tenant's tenancies, while owners and agents can
+      // report concerns about properties they manage. This stops arbitrary
+      // account holders from attaching sensitive reports to unrelated homes.
+      const managesListing = [listing.landlordId, listing.managingAgentId, listing.createdById].includes(reporterId);
+      if (!managesListing) {
+        const tenancy = await this.prisma.tenancy.findFirst({
+          where: {
+            listingId: listing.id,
+            OR: [{ tenantId: reporterId }, { landlordId: reporterId }, { agentId: reporterId }],
+          },
+          select: { id: true },
+        });
+        if (!tenancy) {
+          throw new ForbiddenException('You can only report a concern for a listing connected to your tenancy or management account');
+        }
       }
     }
-    input.evidence.forEach((item) => this.mediaService.assertOwnedPublicId(item.publicId, reporterId, 'incident'));
+    input.evidence.forEach((item) => this.mediaService.assertOwnedObjectKey(item.publicId, reporterId, 'incident'));
     const reference = `SR-${new Date().getUTCFullYear()}-${Math.random().toString(36).slice(2, 9).toUpperCase()}`;
     return this.prisma.incidentReport.create({
       data: {

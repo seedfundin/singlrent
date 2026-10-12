@@ -6,7 +6,7 @@ import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { AuthenticatedUser } from '../common/types/authenticated-user';
 import { ZodValidationPipe } from '../common/validation/zod-validation.pipe';
-import { CreateReviewRequest, createReviewSchema, ModerateReviewRequest, moderateReviewSchema, ReviewQuery, reviewQuerySchema } from './dto/review.schemas';
+import { AdminReviewQuery, adminReviewQuerySchema, CreateReviewRequest, createReviewSchema, ModerateReviewRequest, moderateReviewSchema, ReviewQuery, reviewQuerySchema } from './dto/review.schemas';
 import { ReviewsService } from './reviews.service';
 
 @ApiTags('Reviews')
@@ -18,6 +18,25 @@ export class ReviewsController {
   @Get()
   list(@Query(new ZodValidationPipe(reviewQuerySchema)) query: ReviewQuery) {
     return this.reviewsService.list(query);
+  }
+
+  @ApiBearerAuth()
+  @Get('mine')
+  mine(@CurrentUser() user: AuthenticatedUser, @Query(new ZodValidationPipe(adminReviewQuerySchema)) query: AdminReviewQuery) {
+    return this.reviewsService.mine(user.userId, query);
+  }
+
+  @ApiBearerAuth()
+  @Get('opportunities')
+  opportunities(@CurrentUser() user: AuthenticatedUser, @Query(new ZodValidationPipe(adminReviewQuerySchema)) query: AdminReviewQuery) {
+    return this.reviewsService.opportunities(user.userId, query);
+  }
+
+  @ApiBearerAuth()
+  @Get('admin')
+  @RequirePermissions(PermissionKey.REVIEWS_VIEW)
+  admin(@Query(new ZodValidationPipe(adminReviewQuerySchema)) query: AdminReviewQuery) {
+    return this.reviewsService.adminList(query);
   }
 
   @ApiBearerAuth()

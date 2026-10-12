@@ -1,10 +1,10 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { AccountType, KycFlow, SignIn, SignUp } from "@/features/auth/auth";
+import { AccountType, EmailVerification, KycFlow, SignIn, SignUp } from "@/features/auth/auth";
 import { useAppNavigation, useAppSession } from "@/features/app/app-provider";
 import type { AccountRole } from "@/lib/account";
-import { api, registrationDraftStore, sessionStore, type ApiSession } from "@/lib/api";
+import { api, registrationDraftStore, type ApiSession } from "@/lib/api";
 import type { View } from "@/lib/routes";
 
 function destinationFor(session: ApiSession): View {
@@ -17,7 +17,7 @@ function destinationFor(session: ApiSession): View {
 export function SignInPage() {
   const { go } = useAppNavigation();
   const { setSession } = useAppSession();
-  return <SignIn go={go} onAuthenticated={(session) => { setSession(session); go(destinationFor(session)); }} />;
+  return <SignIn go={go} onAuthenticated={(session) => { setSession(session); go(session.user.emailVerified ? destinationFor(session) : "verify-email"); }} />;
 }
 
 export function SignUpPage() {
@@ -36,11 +36,16 @@ export function AccountTypePage() {
     }
     const session = await api.auth.register({ ...draft, role: role.toUpperCase() as "TENANT" | "LANDLORD" | "AGENT" });
     registrationDraftStore.clear();
-    sessionStore.set(session);
     setSession(session);
-    go("kyc", { role });
+    go("verify-email");
   };
   return <AccountType go={go} onChoose={chooseRole} />;
+}
+
+export function EmailVerificationPage() {
+  const { go } = useAppNavigation();
+  const { session, setSession } = useAppSession();
+  return <EmailVerification go={go} session={session} onVerified={(nextSession) => { setSession(nextSession); go(destinationFor(nextSession)); }} />;
 }
 
 export function KycPage() {

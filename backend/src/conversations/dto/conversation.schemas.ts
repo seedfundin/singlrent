@@ -4,10 +4,20 @@ import { paginationQuerySchema } from '../../common/http/pagination';
 
 export const createConversationSchema = z.object({
   listingId: z.string().uuid().optional(),
-  recipientId: z.string().uuid(),
+  recipientId: z.string().uuid().optional(),
   subject: z.string().trim().min(1).max(255).optional(),
   type: z.nativeEnum(ConversationType).default(ConversationType.LISTING_ENQUIRY),
   initialMessage: z.string().trim().min(1).max(5000).optional(),
+}).superRefine((input, context) => {
+  if (input.type === ConversationType.PROPERTY_AI) {
+    if (!input.listingId) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['listingId'], message: 'A listing is required for the property assistant' });
+    }
+    return;
+  }
+  if (!input.recipientId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['recipientId'], message: 'A recipient is required for this conversation' });
+  }
 });
 
 export const sendMessageSchema = z.object({

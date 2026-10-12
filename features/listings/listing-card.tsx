@@ -20,9 +20,17 @@ export function listingLocation(listing: ApiListing) {
   return `${listing.area}, ${listing.state}`;
 }
 
+export function listingImages(listing: ApiListing) {
+  return listing.media.filter((item) => item.mediaType === "IMAGE").sort((left, right) => left.position - right.position);
+}
+
+export function listingVideo(listing: ApiListing) {
+  return listing.media.find((item) => item.mediaType === "VIDEO");
+}
+
 export function ListingPhoto({ listing, className }: { listing: ApiListing; className?: string }) {
-  const image = listing.images[0]?.url;
-  if (image) return <img className={className ?? "img"} src={image} alt={listing.images[0]?.altText ?? listing.title} />;
+  const image = listingImages(listing)[0];
+  if (image) return <img className={className ?? "img"} src={image.url} alt={image.altText ?? listing.title} />;
   return <div className={`${className ?? "img"} listing-photo-empty`} aria-label="No property photo uploaded"><House size={28} /><small>Photo coming soon</small></div>;
 }
 
@@ -60,7 +68,7 @@ export function ListingCard({
     <article className="property-card">
       <div className="property-pic">
         <ListingPhoto listing={listing} />
-        <Status><BadgeCheck size={12} /> Verified</Status>
+        <Status><BadgeCheck size={12} /> Listed</Status>
         <button className="save" onClick={toggleSave} disabled={saving} aria-label={saved ? `Remove ${listing.title} from saved homes` : `Save ${listing.title}`}><Heart size={15} fill={saved ? "currentColor" : "none"} /></button>
       </div>
       <div className="property-text">
@@ -97,8 +105,8 @@ export function LiveListings({
       .finally(() => active && setLoading(false));
     return () => { active = false; };
   }, [limit]);
-  if (loading) return <div className="listing-state"><Clock3 size={17} /> Loading verified homes…</div>;
+  if (loading) return <div className="listing-state"><Clock3 size={17} /> Loading homes…</div>;
   if (error) return <div className="listing-state error"><CircleAlert size={17} /> {error}</div>;
-  if (!listings.length) return <div className="listing-state"><House size={17} /> No verified homes are available yet.</div>;
+  if (!listings.length) return <div className="listing-state"><House size={17} /> No homes are available yet.</div>;
   return <div className={className}>{listings.map((listing) => <motion.div key={listing.id} whileHover={{ y: -6 }} transition={{ duration: 0.2 }}><ListingCard go={go} listing={listing} short={compact} /></motion.div>)}</div>;
 }

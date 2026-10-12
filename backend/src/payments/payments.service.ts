@@ -1,7 +1,8 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException, PreconditionFailedException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ApplicationStatus,
+  CautionDeductionOutcome,
   CautionStatus,
   EscrowStatus,
   LedgerAccountCode,
@@ -21,28 +22,53 @@ import { PrismaService } from '../common/database/prisma.service';
 import { PricingService } from '../financials/pricing.service';
 import { LedgerService } from '../financials/ledger.service';
 import { PayoutExecutionService } from '../financials/payout-execution.service';
-import { PaystackService } from '../integrations/paystack.service';
 import { PayoutJobsService } from '../jobs/payout-jobs.service';
+import { PaystackService } from '../integrations/paystack.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RealtimeGateway } from '../websocket/realtime.gateway';
+import { KycService } from '../users/kyc.service';
+import { UsersService } from '../users/users.service';
 import {
   CautionDeductionRequest,
   PaymentInitializationRequest,
   PaymentQuery,
   PaystackWebhookRequest,
   ResolveCautionDeductionRequest,
+  ResolveCautionDisputeRequest,
+  RefundPaymentRequest,
 } from './dto/payment.schemas';
 
 const paymentInclude = {
   listing: { select: { id: true, slug: true, title: true, source: true } },
   application: { select: { id: true, status: true, moveInDate: true, leaseMonths: true } },
   escrow: { include: { cautionDeductions: true } },
-  payouts: { orderBy: { createdAt: 'asc' as const } },
+  payouts: {
+    select: {
+      id: true,
+      recipientUserId: true,
+      kind: true,
+      status: true,
+      amountKobo: true,
+      serviceFeeKobo: true,
+      providerReference: true,
+      scheduledAt: true,
+      paidAt: true,
+      createdAt: true,
+    },
+    orderBy: { createdAt: 'asc' as const },
+  },
+  tenant: { select: { id: true, firstName: true, lastName: true } },
   landlord: { select: { id: true, firstName: true, lastName: true } },
   agent: { select: { id: true, firstName: true, lastName: true } },
 } satisfies Prisma.PaymentInclude;
 
-type PaymentView = Prisma.PaymentGetPayload<{ include: typeof paymentInclude }>;
+type PaymentRecord = Prisma.PaymentGetPayload<{ include: typeof paymentInclude }>;
+type PaymentView = Omit<PaymentRecord, 'payouts'> & {
+  // `reference` is retained for backwards compatibility; this explicit alias
+  // makes the shared transaction identifier unambiguous to every board.
+  transactionReference: string;
+  payouts: PaymentRecord['payouts'];
+};
 const confirmableStatuses: PaymentStatus[] = [PaymentStatus.INITIALIZED, PaymentStatus.PENDING];
 
 function jsonValue(value: unknown): Prisma.InputJsonValue {
@@ -56,15 +82,30 @@ export class PaymentsService {
     private readonly pricingService: PricingService,
     private readonly ledger: LedgerService,
     private readonly payoutExecutionService: PayoutExecutionService,
+    private readonly payoutJobs: PayoutJobsService,
     private readonly paystack: PaystackService,
     private readonly configService: ConfigService,
-    private readonly payoutJobs: PayoutJobsService,
     private readonly notificationsService: NotificationsService,
     private readonly realtimeGateway: RealtimeGateway,
     private readonly audit: AuditService,
+    private readonly usersService: UsersService,
+    private readonly kycService: KycService,
   ) {}
 
   async initialize(tenantId: string, input: PaymentInitializationRequest) {
+    await this.usersService.assertEmailVerified(tenantId);
+    try {
+      await this.kycService.assertVerified(tenantId);
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        throw new PreconditionFailedException({
+          code: 'KYC_REQUIRED',
+          message: 'Complete the one-time Dojah NIN verification before paying rent. A ₦100 service fee is paid before each Dojah attempt, including an unsuccessful verification.',
+          serviceFeeKobo: KycService.SERVICE_FEE_KOBO.toString(),
+        });
+      }
+      throw error;
+    }
     const application = await this.prisma.rentalApplication.findFirst({
       where: { id: input.applicationId, tenantId, status: ApplicationStatus.AWAITING_PAYMENT },
       include: { listing: true, tenant: { select: { email: true } } },
@@ -127,7 +168,8 @@ export class PaymentsService {
       await this.markFailed(payment.id, jsonValue(verification.payload));
       throw new ConflictException('Paystack has not confirmed this payment');
     }
-    return this.recordSuccessfulPayment(payment.reference, verification.amountKobo, verification.currency, jsonValue(verification.payload));
+    const confirmed = await this.recordSuccessfulPayment(payment.reference, verification.amountKobo, verification.currency, jsonValue(verification.payload));
+    return this.toViewerPayment(confirmed, userId);
   }
 
   async list(userId: string, query: PaymentQuery): Promise<Paginated<PaymentView>> {
@@ -144,7 +186,7 @@ export class PaymentsService {
       }),
       this.prisma.payment.count({ where }),
     ]);
-    return pageResult(items, total, query);
+    return pageResult(items.map((item) => this.toViewerPayment(item, userId)), total, query);
   }
 
   async get(userId: string, paymentId: string): Promise<PaymentView> {
@@ -155,10 +197,23 @@ export class PaymentsService {
     if (!payment) {
       throw new NotFoundException('Payment not found');
     }
-    return payment;
+    return this.toViewerPayment(payment, userId);
   }
 
   async authorizeRelease(managerId: string, paymentId: string): Promise<PaymentView> {
+    const updated = await this.authorizeEscrowRelease(managerId, paymentId, false);
+    await this.notifyPaymentParticipants(updated, NotificationType.ESCROW_UPDATED, 'Escrow release authorized', 'The tenancy was approved. Landlord and agent payouts are now available to withdraw after one-time verification.');
+    return this.toViewerPayment(updated, managerId);
+  }
+
+  async authorizeReleaseByAdmin(adminId: string, paymentId: string) {
+    const updated = await this.authorizeEscrowRelease(adminId, paymentId, true);
+    await this.audit.record({ actorUserId: adminId, action: 'escrow.release_authorized_by_admin', entityType: 'payment', entityId: paymentId });
+    await this.notifyPaymentParticipants(updated, NotificationType.ESCROW_UPDATED, 'Escrow release authorized', 'SingleRent operations authorized the release. Landlord and agent payouts are now available to withdraw after one-time verification.');
+    return { ...updated, transactionReference: updated.reference };
+  }
+
+  private async authorizeEscrowRelease(actorId: string, paymentId: string, adminOverride: boolean): Promise<PaymentRecord> {
     const payment = await this.prisma.payment.findUnique({
       where: { id: paymentId },
       include: { application: true, escrow: true },
@@ -166,7 +221,7 @@ export class PaymentsService {
     if (!payment) {
       throw new NotFoundException('Payment not found');
     }
-    if (![payment.landlordId, payment.agentId].includes(managerId)) {
+    if (!adminOverride && ![payment.landlordId, payment.agentId].includes(actorId)) {
       throw new ForbiddenException('Only the landlord or managing agent can authorize fund release');
     }
     const escrow = payment.escrow;
@@ -174,7 +229,7 @@ export class PaymentsService {
       throw new ConflictException('This payment is not ready for escrow release');
     }
 
-    const payoutIds = await this.prisma.$transaction(async (transaction) => {
+    await this.prisma.$transaction(async (transaction) => {
       const released = await transaction.escrowRecord.updateMany({
         where: { id: escrow.id, status: EscrowStatus.HELD },
         data: { status: EscrowStatus.RELEASE_SCHEDULED, releaseAuthorizedAt: new Date() },
@@ -208,8 +263,7 @@ export class PaymentsService {
             recipientUserId: payment.landlordId,
             kind: PayoutKind.LANDLORD,
             amountKobo: payment.rentAmountKobo,
-            status: PayoutStatus.SCHEDULED,
-            scheduledAt: new Date(),
+            status: PayoutStatus.PENDING,
           },
         }),
         ...(payment.agentId && payment.agentFeeKobo > 0n
@@ -220,8 +274,7 @@ export class PaymentsService {
                   recipientUserId: payment.agentId,
                   kind: PayoutKind.AGENT,
                   amountKobo: payment.agentFeeKobo,
-                  status: PayoutStatus.SCHEDULED,
-                  scheduledAt: new Date(),
+                  status: PayoutStatus.PENDING,
                 },
               }),
             ]
@@ -235,24 +288,31 @@ export class PaymentsService {
         amountKobo: payment.rentAmountKobo,
         idempotencyKey: `payment:${payment.id}:landlord-payout`,
       });
-      return payouts.map((payout) => payout.id);
+      return payouts;
     });
-    await Promise.all(payoutIds.map((payoutId) => this.payoutJobs.enqueue(payoutId).catch(() => undefined)));
-    const updated = await this.get(managerId, paymentId);
-    await this.notifyPaymentParticipants(updated, NotificationType.ESCROW_UPDATED, 'Escrow release authorized', 'The tenancy was approved and payout processing has started.');
-    return updated;
+    return this.prisma.payment.findUniqueOrThrow({ where: { id: paymentId }, include: paymentInclude });
   }
 
   async proposeCautionDeduction(managerId: string, paymentId: string, input: CautionDeductionRequest) {
-    const payment = await this.prisma.payment.findUnique({ where: { id: paymentId }, include: { escrow: true } });
+    const payment = await this.prisma.payment.findUnique({ where: { id: paymentId }, include: { escrow: { include: { cautionDeductions: true } }, application: { include: { tenancy: true } } } });
     if (!payment || !payment.escrow) {
       throw new NotFoundException('Escrow payment not found');
     }
     if (![payment.landlordId, payment.agentId].includes(managerId)) {
       throw new ForbiddenException('Only the landlord or managing agent can propose a caution deduction');
     }
+    if (payment.application.tenancy?.status !== 'ENDED') {
+      throw new ConflictException('Caution deductions can be proposed only after the tenancy has ended');
+    }
+    if (payment.escrow.cautionStatus !== CautionStatus.HELD) {
+      throw new ConflictException('The caution balance is not available for a new deduction');
+    }
+    if (payment.escrow.cautionDeductions.some((candidate) => !candidate.acceptedAt && !candidate.disputedAt && !candidate.resolvedAt)) {
+      throw new ConflictException('Resolve the existing caution deduction before proposing another one');
+    }
     const amountKobo = parseKobo(input.amountKobo, 'amountKobo');
-    if (amountKobo <= 0n || amountKobo > payment.escrow.cautionHeldKobo) {
+    const alreadySettled = this.settledCautionDeductionAmount(payment.escrow.cautionDeductions);
+    if (amountKobo <= 0n || amountKobo > payment.escrow.cautionHeldKobo - alreadySettled) {
       throw new ConflictException('Caution deduction must not exceed held caution funds');
     }
     const deduction = await this.prisma.$transaction(async (transaction) => {
@@ -282,8 +342,20 @@ export class PaymentsService {
       throw new ConflictException('This caution deduction has already been resolved');
     }
     await this.prisma.$transaction(async (transaction) => {
-      await transaction.cautionDeduction.update({ where: { id: deduction.id }, data: { acceptedAt: new Date(), resolutionNote: input.note } });
-      await transaction.escrowRecord.update({ where: { id: payment.escrow!.id }, data: { cautionStatus: CautionStatus.SETTLED } });
+      await transaction.cautionDeduction.update({
+        where: { id: deduction.id },
+        data: {
+          acceptedAt: new Date(),
+          resolvedAt: new Date(),
+          resolution: CautionDeductionOutcome.LANDLORD_PAID,
+          resolutionNote: input.note,
+        },
+      });
+      const settledDeductions = this.settledCautionDeductionAmount(payment.escrow!.cautionDeductions) + deduction.amountKobo;
+      await transaction.escrowRecord.update({
+        where: { id: payment.escrow!.id },
+        data: { cautionStatus: settledDeductions >= payment.escrow!.cautionHeldKobo ? CautionStatus.SETTLED : CautionStatus.HELD },
+      });
       await this.ledger.record(transaction, {
         paymentId: payment.id,
         entryType: LedgerEntryType.CAUTION_DEDUCTION_ALLOCATED,
@@ -293,7 +365,185 @@ export class PaymentsService {
         idempotencyKey: `deduction:${deduction.id}:accepted`,
         metadata: { note: input.note ?? null },
       });
+      // An accepted deduction is money payable to the landlord, not merely a
+      // ledger note. It becomes a normal, KYC-gated payout that the landlord
+      // can withdraw to the configured Paystack destination.
+      await transaction.payout.create({
+        data: {
+          paymentId: payment.id,
+          recipientUserId: payment.landlordId,
+          kind: PayoutKind.CAUTION_DEDUCTION,
+          amountKobo: deduction.amountKobo,
+          status: PayoutStatus.PENDING,
+        },
+      });
     });
+  }
+
+  async returnRemainingCaution(managerId: string, paymentId: string) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: { application: { include: { tenancy: true } }, escrow: { include: { cautionDeductions: true } }, payouts: true },
+    });
+    if (!payment?.escrow) throw new NotFoundException('Escrow payment not found');
+    if (![payment.landlordId, payment.agentId].includes(managerId)) {
+      throw new ForbiddenException('Only the landlord or managing agent can return caution funds');
+    }
+    if (payment.application.tenancy?.status !== 'ENDED') {
+      throw new ConflictException('Caution can be returned only after the tenancy has ended');
+    }
+    if (payment.escrow.cautionStatus === CautionStatus.DISPUTED || payment.escrow.cautionStatus === CautionStatus.DEDUCTION_PROPOSED) {
+      throw new ConflictException('Resolve the pending caution deduction before returning the balance');
+    }
+    const available = this.availableCautionRefundAmount(payment.escrow.cautionHeldKobo, payment.escrow.cautionDeductions, payment.payouts);
+    if (available <= 0n) throw new ConflictException('No caution balance remains to return');
+    return this.scheduleRefund(managerId, paymentId, {
+      scope: 'CAUTION',
+      amountKobo: available.toString(),
+      reason: 'Remaining caution balance returned after tenancy completion',
+    // Rent release may already be scheduled while the publisher has not yet
+    // withdrawn it. Caution is a distinct balance, so ending the tenancy must
+    // still be able to return it in that state.
+    }, [EscrowStatus.HELD, EscrowStatus.RELEASE_SCHEDULED, EscrowStatus.PARTIALLY_SETTLED, EscrowStatus.RELEASED]);
+  }
+
+  async issueRefund(actorId: string, paymentId: string, input: RefundPaymentRequest) {
+    return this.scheduleRefund(actorId, paymentId, input, [EscrowStatus.HELD, EscrowStatus.PARTIALLY_SETTLED]);
+  }
+
+  private async scheduleRefund(actorId: string, paymentId: string, input: RefundPaymentRequest, allowedEscrowStatuses: EscrowStatus[]) {
+    const amountKobo = parseKobo(input.amountKobo, 'amountKobo');
+    if (amountKobo <= 0n) throw new ConflictException('Refund amount must be greater than zero');
+
+    const payout = await this.prisma.$transaction(async (transaction) => {
+      const payment = await transaction.payment.findUnique({
+        where: { id: paymentId },
+        include: {
+          escrow: { include: { cautionDeductions: true } },
+          tenant: { include: { payoutAccount: true } },
+          payouts: { select: { kind: true, status: true, amountKobo: true } },
+        },
+      });
+      if (!payment?.escrow || payment.status !== PaymentStatus.SUCCESS) {
+        throw new ConflictException('Only a confirmed escrow payment can be refunded');
+      }
+      if (!allowedEscrowStatuses.includes(payment.escrow.status)) {
+        throw new ConflictException('This escrow is not available for a refund');
+      }
+      if (!payment.tenant.payoutAccount) {
+        throw new PreconditionFailedException({
+          code: 'REFUND_DESTINATION_REQUIRED',
+          message: 'The tenant must add a bank account before this refund can be sent.',
+        });
+      }
+
+      const kind = input.scope === 'CAUTION' ? PayoutKind.CAUTION_REFUND : PayoutKind.REFUND;
+      const availableAmount = input.scope === 'CAUTION'
+        ? this.availableCautionRefundAmount(payment.escrow.cautionHeldKobo, payment.escrow.cautionDeductions, payment.payouts)
+        : this.availableRentRefundAmount(payment.escrow.rentHeldKobo, payment.payouts);
+      if (amountKobo > availableAmount) {
+        throw new ConflictException(`Refund exceeds the available ${input.scope.toLowerCase()} escrow balance`);
+      }
+
+      const created = await transaction.payout.create({
+        data: {
+          paymentId: payment.id,
+          recipientUserId: payment.tenantId,
+          kind,
+          amountKobo,
+          status: PayoutStatus.SCHEDULED,
+          scheduledAt: new Date(),
+        },
+      });
+      await this.ledger.record(transaction, {
+        paymentId: payment.id,
+        entryType: input.scope === 'CAUTION' ? LedgerEntryType.CAUTION_REFUND_ALLOCATED : LedgerEntryType.REFUND_ISSUED,
+        debitAccount: input.scope === 'CAUTION' ? LedgerAccountCode.CAUTION_ESCROW : LedgerAccountCode.RENT_ESCROW,
+        creditAccount: LedgerAccountCode.TENANT_REFUND_PAYABLE,
+        amountKobo,
+        idempotencyKey: `refund:${created.id}:allocated`,
+        metadata: { reason: input.reason, scope: input.scope, actorId },
+      });
+      await transaction.escrowRecord.update({
+        where: { id: payment.escrow.id },
+        data: { status: EscrowStatus.PARTIALLY_SETTLED },
+      });
+      return created;
+    });
+    await this.audit.record({ actorUserId: actorId, action: 'payment.refund_scheduled', entityType: 'payment', entityId: paymentId, metadata: { payoutId: payout.id, amountKobo: amountKobo.toString(), scope: input.scope, reason: input.reason } });
+    await this.payoutJobs.enqueue(payout.id);
+    return payout;
+  }
+
+  async resolveCautionDispute(adminId: string, paymentId: string, deductionId: string, input: ResolveCautionDisputeRequest) {
+    const result = await this.prisma.$transaction(async (transaction) => {
+      const payment = await transaction.payment.findUnique({
+        where: { id: paymentId },
+        include: {
+          escrow: { include: { cautionDeductions: true } },
+          tenant: { include: { payoutAccount: true } },
+          payouts: { select: { kind: true, status: true, amountKobo: true } },
+        },
+      });
+      const deduction = payment?.escrow?.cautionDeductions.find((candidate) => candidate.id === deductionId);
+      if (!payment?.escrow || !deduction) throw new NotFoundException('Caution deduction not found');
+      if (!deduction.disputedAt || deduction.resolvedAt) throw new ConflictException('This caution deduction is not awaiting an admin decision');
+
+      if (input.outcome === 'PAY_LANDLORD') {
+        await transaction.cautionDeduction.update({
+          where: { id: deduction.id },
+          data: { resolvedAt: new Date(), resolution: CautionDeductionOutcome.LANDLORD_PAID, resolutionNote: input.note },
+        });
+        await this.ledger.record(transaction, {
+          paymentId,
+          entryType: LedgerEntryType.CAUTION_DEDUCTION_ALLOCATED,
+          debitAccount: LedgerAccountCode.CAUTION_ESCROW,
+          creditAccount: LedgerAccountCode.LANDLORD_PAYABLE,
+          amountKobo: deduction.amountKobo,
+          idempotencyKey: `deduction:${deduction.id}:admin-landlord-payout`,
+          metadata: { note: input.note, resolvedBy: adminId },
+        });
+        const payout = await transaction.payout.create({
+          data: { paymentId, recipientUserId: payment.landlordId, kind: PayoutKind.CAUTION_DEDUCTION, amountKobo: deduction.amountKobo, status: PayoutStatus.PENDING },
+        });
+        const settled = this.settledCautionDeductionAmount(payment.escrow.cautionDeductions) + deduction.amountKobo;
+        await transaction.escrowRecord.update({
+          where: { id: payment.escrow.id },
+          data: {
+            status: EscrowStatus.PARTIALLY_SETTLED,
+            cautionStatus: settled >= payment.escrow.cautionHeldKobo ? CautionStatus.SETTLED : CautionStatus.HELD,
+          },
+        });
+        return { payout, queued: false };
+      }
+
+      if (!payment.tenant.payoutAccount) {
+        throw new PreconditionFailedException({ code: 'REFUND_DESTINATION_REQUIRED', message: 'The tenant must add a bank account before this refund can be sent.' });
+      }
+      const available = this.availableCautionRefundAmount(payment.escrow.cautionHeldKobo, payment.escrow.cautionDeductions, payment.payouts);
+      if (deduction.amountKobo > available) throw new ConflictException('The disputed amount is no longer available to refund');
+      await transaction.cautionDeduction.update({
+        where: { id: deduction.id },
+        data: { resolvedAt: new Date(), resolution: CautionDeductionOutcome.TENANT_REFUND, resolutionNote: input.note },
+      });
+      const payout = await transaction.payout.create({
+        data: { paymentId, recipientUserId: payment.tenantId, kind: PayoutKind.CAUTION_REFUND, amountKobo: deduction.amountKobo, status: PayoutStatus.SCHEDULED, scheduledAt: new Date() },
+      });
+      await this.ledger.record(transaction, {
+        paymentId,
+        entryType: LedgerEntryType.CAUTION_REFUND_ALLOCATED,
+        debitAccount: LedgerAccountCode.CAUTION_ESCROW,
+        creditAccount: LedgerAccountCode.TENANT_REFUND_PAYABLE,
+        amountKobo: deduction.amountKobo,
+        idempotencyKey: `deduction:${deduction.id}:admin-tenant-refund`,
+        metadata: { note: input.note, resolvedBy: adminId },
+      });
+      await transaction.escrowRecord.update({ where: { id: payment.escrow.id }, data: { status: EscrowStatus.PARTIALLY_SETTLED, cautionStatus: CautionStatus.HELD } });
+      return { payout, queued: true };
+    });
+    await this.audit.record({ actorUserId: adminId, action: 'caution.dispute_resolved', entityType: 'caution_deduction', entityId: deductionId, metadata: { paymentId, outcome: input.outcome } });
+    if (result.queued) await this.payoutJobs.enqueue(result.payout.id);
+    return result.payout;
   }
 
   async disputeCautionDeduction(tenantId: string, paymentId: string, deductionId: string, input: ResolveCautionDeductionRequest): Promise<void> {
@@ -334,7 +584,15 @@ export class PaymentsService {
         if (verified.status !== 'success') {
           throw new ConflictException('Paystack did not verify this payment as successful');
         }
-        await this.recordSuccessfulPayment(reference, verified.amountKobo, verified.currency, jsonValue(verified.payload));
+        const serviceChargeHandled = await this.kycService.processTenantVerificationCharge(
+          reference,
+          verified.amountKobo,
+          verified.currency,
+          jsonValue(verified.payload),
+        );
+        if (!serviceChargeHandled) {
+          await this.recordSuccessfulPayment(reference, verified.amountKobo, verified.currency, jsonValue(verified.payload));
+        }
       }
       if (event.event === 'transfer.success' || event.event === 'transfer.failed') {
         const reference = typeof event.data.reference === 'string' ? event.data.reference : undefined;
@@ -357,7 +615,7 @@ export class PaymentsService {
     }
   }
 
-  private async recordSuccessfulPayment(reference: string, amountKobo: bigint, currency: string, payload: Prisma.InputJsonValue): Promise<PaymentView> {
+  private async recordSuccessfulPayment(reference: string, amountKobo: bigint, currency: string, payload: Prisma.InputJsonValue): Promise<PaymentRecord> {
     const payment = await this.prisma.$transaction(async (transaction) => {
       const current = await transaction.payment.findUnique({ where: { reference }, include: { application: true } });
       if (!current) {
@@ -438,7 +696,39 @@ export class PaymentsService {
     });
   }
 
-  private async notifyPaymentParticipants(payment: PaymentView, type: NotificationType, title: string, body: string): Promise<void> {
+  private settledCautionDeductionAmount(
+    deductions: Array<{ amountKobo: bigint; acceptedAt: Date | null; resolution: CautionDeductionOutcome | null }>,
+  ): bigint {
+    return deductions
+      .filter((deduction) => deduction.acceptedAt || deduction.resolution === CautionDeductionOutcome.LANDLORD_PAID)
+      .reduce((total, deduction) => total + deduction.amountKobo, 0n);
+  }
+
+  private availableCautionRefundAmount(
+    heldAmount: bigint,
+    deductions: Array<{ amountKobo: bigint; acceptedAt: Date | null; resolution: CautionDeductionOutcome | null }>,
+    payouts: Array<{ kind: PayoutKind; status: PayoutStatus; amountKobo: bigint }>,
+  ): bigint {
+    const allocatedRefunds = payouts
+      .filter((payout) => payout.kind === PayoutKind.CAUTION_REFUND && payout.status !== PayoutStatus.CANCELLED && payout.status !== PayoutStatus.FAILED)
+      .reduce((total, payout) => total + payout.amountKobo, 0n);
+    return heldAmount - this.settledCautionDeductionAmount(deductions) - allocatedRefunds;
+  }
+
+  private availableRentRefundAmount(
+    heldAmount: bigint,
+    payouts: Array<{ kind: PayoutKind; status: PayoutStatus; amountKobo: bigint }>,
+  ): bigint {
+    // Rent refunds and landlord payouts both consume the same held-rent balance.
+    // Count either allocation so a refund cannot be approved after rent is
+    // already reserved for a landlord payout.
+    const allocatedRefunds = payouts
+      .filter((payout) => (payout.kind === PayoutKind.REFUND || payout.kind === PayoutKind.LANDLORD) && payout.status !== PayoutStatus.CANCELLED && payout.status !== PayoutStatus.FAILED)
+      .reduce((total, payout) => total + payout.amountKobo, 0n);
+    return heldAmount - allocatedRefunds;
+  }
+
+  private async notifyPaymentParticipants(payment: PaymentRecord, type: NotificationType, title: string, body: string): Promise<void> {
     const recipients = [payment.tenantId, payment.landlordId, payment.agentId].filter((id): id is string => Boolean(id));
     await Promise.all(
       [...new Set(recipients)].map(async (userId) => {
@@ -446,6 +736,17 @@ export class PaymentsService {
         return this.notificationsService.create({ userId, type, title, body, data: { paymentId: payment.id, applicationId: payment.applicationId } });
       }),
     );
+  }
+
+  private toViewerPayment(payment: PaymentRecord, viewerId: string): PaymentView {
+    // A tenant may follow the shared transaction through escrow, but should not
+    // receive a landlord/agent's bank-transfer reference. A publisher only sees
+    // their own payout audit details. Administrators use the dedicated endpoint.
+    const canViewAllPayouts = payment.tenantId !== viewerId && payment.landlordId === viewerId && !payment.agentId;
+    const payouts = canViewAllPayouts
+      ? payment.payouts
+      : payment.payouts.filter((payout) => payout.recipientUserId === viewerId);
+    return { ...payment, transactionReference: payment.reference, payouts };
   }
 
   private verifyWebhookSignature(rawBody: Buffer, signature: string | undefined): void {

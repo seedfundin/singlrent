@@ -1,4 +1,4 @@
-import { PermissionEffect, PermissionKey, RoleCode, UserStatus } from '@prisma/client';
+import { ListingStatus, MaintenanceStatus, PaymentStatus, PermissionEffect, PermissionKey, RoleCode, UserStatus } from '@prisma/client';
 import { z } from 'zod';
 import { paginationQuerySchema } from '../../common/http/pagination';
 
@@ -8,6 +8,18 @@ export const adminUserQuerySchema = paginationQuerySchema.extend({
   role: z.nativeEnum(RoleCode).optional(),
   status: z.nativeEnum(UserStatus).optional(),
   search: z.string().trim().max(320).optional(),
+});
+export const adminListingQuerySchema = paginationQuerySchema.extend({
+  status: z.nativeEnum(ListingStatus).optional(),
+});
+export const adminTransactionQuerySchema = paginationQuerySchema.extend({
+  status: z.nativeEnum(PaymentStatus).optional(),
+  // Searches the shared SingleRent reference first, then the related Paystack
+  // collection/transfer references and the transaction participants.
+  search: z.string().trim().min(1).max(180).optional(),
+});
+export const adminMaintenanceQuerySchema = paginationQuerySchema.extend({
+  status: z.nativeEnum(MaintenanceStatus).optional(),
 });
 export const updateUserStatusSchema = z.object({ status: z.nativeEnum(UserStatus) });
 export const assignRoleSchema = z.object({ role: z.nativeEnum(RoleCode) });
@@ -39,8 +51,20 @@ export const reviewKycSchema = z.object({
   rejectionReason: z.string().trim().min(3).max(1000).optional(),
 });
 export const moderateListingSchema = z.object({ note: z.string().trim().min(3).max(1000).optional() });
+export const adminRefundSchema = z.object({
+  scope: z.enum(['RENT', 'CAUTION']),
+  amountKobo: z.string().regex(/^\d+$/).max(18),
+  reason: z.string().trim().min(3).max(1000),
+});
+export const adminCautionDisputeResolutionSchema = z.object({
+  outcome: z.enum(['RETURN_TO_TENANT', 'PAY_LANDLORD']),
+  note: z.string().trim().min(3).max(1000),
+});
 
 export type AdminUserQuery = z.infer<typeof adminUserQuerySchema>;
+export type AdminListingQuery = z.infer<typeof adminListingQuerySchema>;
+export type AdminTransactionQuery = z.infer<typeof adminTransactionQuerySchema>;
+export type AdminMaintenanceQuery = z.infer<typeof adminMaintenanceQuerySchema>;
 export type UpdateUserStatusRequest = z.infer<typeof updateUserStatusSchema>;
 export type AssignRoleRequest = z.infer<typeof assignRoleSchema>;
 export type UpdatePermissionsRequest = z.infer<typeof updatePermissionsSchema>;
@@ -48,3 +72,5 @@ export type CreateAdminInvitationRequest = z.infer<typeof createAdminInvitationS
 export type AcceptAdminInvitationRequest = z.infer<typeof acceptAdminInvitationSchema>;
 export type ReviewKycRequest = z.infer<typeof reviewKycSchema>;
 export type ModerateListingRequest = z.infer<typeof moderateListingSchema>;
+export type AdminRefundRequest = z.infer<typeof adminRefundSchema>;
+export type AdminCautionDisputeResolutionRequest = z.infer<typeof adminCautionDisputeResolutionSchema>;

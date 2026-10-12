@@ -12,6 +12,9 @@ export const reviewQuerySchema = paginationQuerySchema.extend({
   listingId: z.string().uuid().optional(),
   targetUserId: z.string().uuid().optional(),
 });
+export const adminReviewQuerySchema = paginationQuerySchema.extend({
+  status: z.nativeEnum(ReviewStatus).optional(),
+});
 export const moderateReviewSchema = z.object({
   status: z.enum([ReviewStatus.HIDDEN, ReviewStatus.REMOVED]),
   note: z.string().trim().min(3).max(1000),
@@ -19,4 +22,5 @@ export const moderateReviewSchema = z.object({
 
 export type CreateReviewRequest = z.infer<typeof createReviewSchema>;
 export type ReviewQuery = z.infer<typeof reviewQuerySchema>;
+export type AdminReviewQuery = z.infer<typeof adminReviewQuerySchema>;
 export type ModerateReviewRequest = z.infer<typeof moderateReviewSchema>;

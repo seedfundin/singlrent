@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma, RoleCode, User } from '@prisma/client';
@@ -10,7 +10,7 @@ import { AuthenticatedUser, JwtPayload } from '../common/types/authenticated-use
 import { PermissionsService } from '../permissions/permissions.service';
 import { RolesService } from '../roles/roles.service';
 import { UsersService } from '../users/users.service';
-import { GoogleAuthRequest, LoginRequest, RefreshRequest, RegisterRequest } from './dto/auth.schemas';
+import { ConfirmEmailVerificationRequest, GoogleAuthRequest, LoginRequest, RefreshRequest, RegisterRequest } from './dto/auth.schemas';
 
 export interface AuthSession {
   accessToken: string;
@@ -21,7 +21,9 @@ export interface AuthSession {
     firstName: string;
     lastName: string;
     roles: RoleCode[];
+    emailVerified: boolean;
   };
+  emailVerification?: { id: string; expiresAt: Date; developmentCode?: string };
 }
 
 @Injectable()
@@ -56,7 +58,11 @@ export class AuthService {
       throw error;
     }
 
-    return this.createSession(user, request);
+    const [session, emailVerification] = await Promise.all([
+      this.createSession(user, request),
+      this.issueEmailChallenge(user),
+    ]);
+    return { ...session, emailVerification };
   }
 
   async login(input: LoginRequest, request: Request): Promise<AuthSession> {
@@ -170,6 +176,36 @@ export class AuthService {
     });
   }
 
+  async resendEmailVerification(currentUser: AuthenticatedUser) {
+    const user = await this.usersService.findByIdOrThrow(currentUser.userId);
+    if (user.emailVerifiedAt) {
+      throw new ConflictException('Your email address has already been verified');
+    }
+    return this.issueEmailChallenge(user);
+  }
+
+  async confirmEmailVerification(currentUser: AuthenticatedUser, input: ConfirmEmailVerificationRequest) {
+    const now = new Date();
+    await this.prisma.$transaction(async (transaction) => {
+      const challenge = await transaction.emailVerificationChallenge.findFirst({
+        where: { id: input.challengeId, userId: currentUser.userId },
+      });
+      if (!challenge || challenge.consumedAt || challenge.expiresAt <= now || challenge.attempts >= 5) {
+        throw new BadRequestException('Email verification code is invalid or expired');
+      }
+      if (this.hashVerificationCode(input.code) !== challenge.codeHash) {
+        await transaction.emailVerificationChallenge.update({
+          where: { id: challenge.id },
+          data: { attempts: { increment: 1 } },
+        });
+        throw new BadRequestException('Email verification code is invalid');
+      }
+      await transaction.emailVerificationChallenge.update({ where: { id: challenge.id }, data: { consumedAt: now } });
+      await transaction.user.update({ where: { id: currentUser.userId }, data: { emailVerifiedAt: now } });
+    });
+    return { verified: true };
+  }
+
   async me(currentUser: AuthenticatedUser): Promise<AuthSession['user']> {
     const user = await this.usersService.findByIdOrThrow(currentUser.userId);
     const authorization = await this.permissionsService.getAuthorizationContext(user.id);
@@ -212,7 +248,38 @@ export class AuthService {
       firstName: user.firstName,
       lastName: user.lastName,
       roles,
+      emailVerified: Boolean(user.emailVerifiedAt),
     };
+  }
+
+  private async issueEmailChallenge(user: User) {
+    const code = String(Math.floor(100_000 + Math.random() * 900_000));
+    const now = new Date();
+    const challenge = await this.prisma.$transaction(async (transaction) => {
+      await transaction.emailVerificationChallenge.updateMany({
+        where: { userId: user.id, consumedAt: null },
+        data: { consumedAt: now },
+      });
+      return transaction.emailVerificationChallenge.create({
+        data: {
+          userId: user.id,
+          email: user.email,
+          codeHash: this.hashVerificationCode(code),
+          expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
+        },
+        select: { id: true, expiresAt: true },
+      });
+    });
+
+    // A delivery provider will replace this development-only disclosure.
+    return {
+      ...challenge,
+      ...(this.configService.get<string>('NODE_ENV') === 'development' ? { developmentCode: code } : {}),
+    };
+  }
+
+  private hashVerificationCode(value: string): string {
+    return createHash('sha256').update(value).digest('hex');
   }
 
   private createRawRefreshToken(): string {

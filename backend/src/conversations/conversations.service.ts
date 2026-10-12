@@ -6,6 +6,7 @@ import { ListingsService } from '../listings/listings.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RealtimeGateway } from '../websocket/realtime.gateway';
 import { ConversationQuery, CreateConversationRequest, SendMessageRequest } from './dto/conversation.schemas';
+import { PropertyAiService } from './property-ai.service';
 
 const conversationInclude = {
   listing: { select: { id: true, slug: true, title: true } },
@@ -24,6 +25,7 @@ export class ConversationsService {
     private readonly listingsService: ListingsService,
     private readonly realtimeGateway: RealtimeGateway,
     private readonly notificationsService: NotificationsService,
+    private readonly propertyAiService: PropertyAiService,
   ) {}
 
   async list(userId: string, query: ConversationQuery): Promise<Paginated<ConversationView & { unreadCount: number }>> {
@@ -69,7 +71,11 @@ export class ConversationsService {
   }
 
   async create(userId: string, input: CreateConversationRequest): Promise<ConversationView> {
-    if (input.recipientId === userId) {
+    if (input.type === ConversationType.PROPERTY_AI) {
+      return this.createPropertyAiConversation(userId, input);
+    }
+    const recipientId = input.recipientId!;
+    if (recipientId === userId) {
       throw new ForbiddenException('You cannot message yourself');
     }
     if (input.listingId) {
@@ -77,11 +83,11 @@ export class ConversationsService {
       const allowedRecipients = [listing.landlordId, listing.managingAgentId].filter(
         (candidate): candidate is string => Boolean(candidate),
       );
-      if (!allowedRecipients.includes(input.recipientId)) {
+      if (!allowedRecipients.includes(recipientId)) {
         throw new ForbiddenException('Choose the landlord or managing agent for this listing');
       }
     } else {
-      const recipient = await this.prisma.user.findUnique({ where: { id: input.recipientId }, select: { id: true } });
+      const recipient = await this.prisma.user.findUnique({ where: { id: recipientId }, select: { id: true } });
       if (!recipient) {
         throw new NotFoundException('Recipient not found');
       }
@@ -92,12 +98,12 @@ export class ConversationsService {
         listingId: input.listingId,
         type: input.type,
         subject: input.subject,
-        members: { create: [{ userId }, { userId: input.recipientId }] },
+        members: { create: [{ userId }, { userId: recipientId }] },
       },
       include: conversationInclude,
     });
     this.realtimeGateway.joinUserToConversation(userId, conversation.id);
-    this.realtimeGateway.joinUserToConversation(input.recipientId, conversation.id);
+    this.realtimeGateway.joinUserToConversation(recipientId, conversation.id);
     if (input.initialMessage) {
       await this.sendMessage(userId, conversation.id, { body: input.initialMessage });
       return this.get(userId, conversation.id);
@@ -122,6 +128,11 @@ export class ConversationsService {
   }
 
   async sendMessage(userId: string, conversationId: string, input: SendMessageRequest) {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { id: true, listingId: true, type: true },
+    });
+    if (!conversation) throw new NotFoundException('Conversation not found');
     const members = await this.membersOrThrow(userId, conversationId);
     const message = await this.prisma.$transaction(async (transaction) => {
       const created = await transaction.message.create({
@@ -136,6 +147,29 @@ export class ConversationsService {
       return created;
     });
     this.realtimeGateway.emitMessage(conversationId, message);
+    if (conversation.type === ConversationType.PROPERTY_AI && conversation.listingId) {
+      const assistantReply = await this.propertyAiService.answer(conversation.listingId, input.body);
+      let answer = assistantReply.body;
+      if (assistantReply.needsPropertyContactReply) {
+        try {
+          const handoff = await this.forwardQuestionToPropertyContact(userId, conversation.listingId, input.body);
+          answer = handoff.forwarded
+            ? `${assistantReply.body} It has been sent to ${handoff.recipientName} for a direct response.`
+            : 'That detail is not included in this listing. This home is managed by your account, so there is no separate property contact to message.';
+        } catch {
+          answer = 'That detail is not included in this listing. I could not send the question to the property contact just now; please try again shortly.';
+        }
+      }
+      const aiMessage = await this.prisma.$transaction(async (transaction) => {
+        const created = await transaction.message.create({
+          data: { conversationId, kind: MessageKind.AI, body: answer },
+          include: { sender: { select: { id: true, firstName: true, lastName: true, profileImageUrl: true } } },
+        });
+        await transaction.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: created.createdAt } });
+        return created;
+      });
+      this.realtimeGateway.emitMessage(conversationId, aiMessage);
+    }
     await Promise.all(
       members
         .filter((member) => member.userId !== userId)
@@ -150,6 +184,74 @@ export class ConversationsService {
         ),
     );
     return message;
+  }
+
+  private async createPropertyAiConversation(userId: string, input: CreateConversationRequest): Promise<ConversationView> {
+    const listingId = input.listingId!;
+    const listing = await this.listingsService.getByPublicId(listingId, userId);
+    const existing = await this.prisma.conversation.findFirst({
+      where: {
+        listingId: listing.id,
+        type: ConversationType.PROPERTY_AI,
+        members: { some: { userId } },
+      },
+      include: conversationInclude,
+      orderBy: { updatedAt: 'desc' },
+    });
+    const conversation = existing ?? await this.prisma.conversation.create({
+      data: {
+        listingId: listing.id,
+        type: ConversationType.PROPERTY_AI,
+        subject: `Property assistant · ${listing.title}`,
+        members: { create: [{ userId }] },
+      },
+      include: conversationInclude,
+    });
+    this.realtimeGateway.joinUserToConversation(userId, conversation.id);
+    if (input.initialMessage) {
+      await this.sendMessage(userId, conversation.id, { body: input.initialMessage });
+    }
+    return this.get(userId, conversation.id);
+  }
+
+  private async forwardQuestionToPropertyContact(
+    userId: string,
+    listingId: string,
+    body: string,
+  ): Promise<{ forwarded: boolean; recipientName: string }> {
+    const listing = await this.listingsService.getByPublicId(listingId, userId);
+    const recipient = listing.managingAgent ?? listing.landlord;
+    const recipientName = `${recipient.firstName} ${recipient.lastName}`.trim();
+    if (recipient.id === userId) {
+      return { forwarded: false, recipientName };
+    }
+
+    const existing = await this.prisma.conversation.findFirst({
+      where: {
+        listingId: listing.id,
+        type: ConversationType.LISTING_ENQUIRY,
+        AND: [
+          { members: { some: { userId } } },
+          { members: { some: { userId: recipient.id } } },
+        ],
+      },
+      select: { id: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    if (existing) {
+      await this.sendMessage(userId, existing.id, { body });
+    } else {
+      await this.create(userId, {
+        listingId: listing.id,
+        recipientId: recipient.id,
+        type: ConversationType.LISTING_ENQUIRY,
+        subject: `Question about ${listing.title}`,
+        initialMessage: body,
+      });
+    }
+
+    return { forwarded: true, recipientName };
   }
 
   async markRead(userId: string, conversationId: string): Promise<void> {

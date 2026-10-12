@@ -26,7 +26,22 @@ export const submitNinSchema = z.object({
   nin: z.string().regex(/^\d{11}$/, 'NIN must contain 11 digits'),
 });
 
+export const publisherVerificationMethodSchema = z.enum(['NIN', 'BVN']);
+
+export const startPublisherVerificationSchema = z.object({
+  method: publisherVerificationMethodSchema,
+});
+
+// The only value used to locate a local session is reference_id. The raw body
+// is signature-checked before the rest of the webhook payload is considered.
+export const dojahWidgetWebhookSchema = z.object({
+  reference_id: z.string().trim().min(10).max(255),
+}).passthrough();
+
 export type UpdateProfileRequest = z.infer<typeof updateProfileSchema>;
 export type SendPhoneVerificationRequest = z.infer<typeof sendPhoneVerificationSchema>;
 export type ConfirmPhoneVerificationRequest = z.infer<typeof confirmPhoneVerificationSchema>;
 export type SubmitNinRequest = z.infer<typeof submitNinSchema>;
+export type PublisherVerificationMethodRequest = z.infer<typeof publisherVerificationMethodSchema>;
+export type StartPublisherVerificationRequest = z.infer<typeof startPublisherVerificationSchema>;
+export type DojahWidgetWebhookRequest = z.infer<typeof dojahWidgetWebhookSchema>;

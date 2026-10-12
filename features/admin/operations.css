@@ -1,0 +1,13 @@
+.operations-summary { margin-bottom: 17px; }
+.operations-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.operations-panel { padding: 17px; }
+.operations-panel .subhead, .system-states-list .subhead { display: flex; align-items: center; justify-content: space-between; margin-top: 0; }
+.operations-panel .subhead > svg, .system-states-list .subhead > svg { color: #a3771b; }
+.operations-panel article, .system-state-row { display: grid; grid-template-columns: 1fr auto; gap: 9px; align-items: center; padding: 13px 0; border-top: 1px solid var(--line); }
+.operations-panel article span, .system-state-row span { display: grid; gap: 4px; min-width: 0; }
+.operations-panel article b, .system-state-row b { color: #29493d; font-size: 12px; }
+.operations-panel article small, .system-state-row small, .operations-empty { overflow: hidden; color: #77867d; font-size: 10px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.operations-empty { padding: 18px 0 3px; }
+.system-states-list { max-width: 720px; padding: 20px; }
+.system-states-list .subhead { margin-bottom: 9px; }
+@media (max-width: 950px) { .operations-grid { grid-template-columns: 1fr; } }

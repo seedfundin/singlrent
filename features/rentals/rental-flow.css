@@ -1,0 +1,177 @@
+.rental-flow { max-width: 1180px; }
+.rental-back { display: flex; gap: 6px; align-items: center; padding: 0; border: 0; color: #5d7167; background: transparent; font-size: 11px; }
+.rental-flow-heading { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin: 24px 0 18px; }
+.rental-flow-heading small { color: #7c8e84; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.rental-flow-heading h1 { margin: 6px 0; color: #204639; font-size: 30px; letter-spacing: -.05em; }
+.rental-flow-heading p { max-width: 680px; margin: 0; color: #718179; font-size: 12px; line-height: 1.55; }
+.rental-flow-grid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 20px; align-items: start; }
+.rental-main { display: grid; gap: 16px; }
+.rental-listing-summary, .rental-form-card, .rental-status-card, .rental-summary, .application-list article, .rental-empty, .rental-confirmation { border: 1px solid #dce8df; border-radius: 14px; background: #fff; }
+.rental-listing-summary { display: flex; gap: 14px; align-items: center; padding: 16px; }
+.rental-listing-summary img, .rental-listing-summary > i { display: grid; flex: 0 0 auto; place-items: center; width: 70px; height: 62px; border-radius: 9px; color: #367959; background: #eaf4ed; object-fit: cover; font-style: normal; }
+.rental-listing-summary h2 { margin: 0 0 6px; color: #304f43; font-size: 16px; }
+.rental-listing-summary p { display: flex; gap: 5px; align-items: center; margin: 0; color: #72847a; font-size: 10px; }
+.rental-listing-summary small { display: block; margin-top: 6px; color: #8b9891; font-size: 9px; text-transform: capitalize; }
+.rental-form-card { padding: 20px; }
+.rental-form-card h2, .rental-status-card h2 { margin: 0; color: #2c4b3e; font-size: 18px; }
+.rental-form-card > p { margin: 7px 0 16px; color: #728279; font-size: 11px; }
+.rental-readonly, .rental-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.rental-readonly { margin-bottom: 16px; padding: 12px; border-radius: 9px; background: #f3f8f4; }
+.rental-readonly span, .rental-form-grid label, .single-field { display: grid; gap: 6px; }
+.rental-readonly small, .rental-form-grid label, .single-field { color: #60736a; font-size: 10px; font-weight: 700; }
+.rental-readonly b { overflow: hidden; color: #335347; font-size: 11px; text-overflow: ellipsis; }
+.rental-form-grid .full { grid-column: 1 / -1; }
+.rental-form-grid input, .rental-form-grid select, .rental-form-grid textarea, .single-field input, .manager-actions textarea { width: 100%; border: 1px solid #d7e4da; border-radius: 8px; color: #315143; background: #fff; font: inherit; font-weight: 400; outline: none; }
+.rental-form-grid input, .rental-form-grid select, .single-field input { height: 39px; padding: 0 10px; }
+.rental-form-grid textarea { min-height: 100px; padding: 10px; resize: vertical; }
+.rental-form-grid input:focus, .rental-form-grid select:focus, .rental-form-grid textarea:focus, .single-field input:focus, .manager-actions textarea:focus { border-color: #4e916d; box-shadow: 0 0 0 3px #e0f0e5; }
+.rental-helper { display: flex; gap: 7px; align-items: flex-start; margin: 16px 0 !important; padding: 10px; border-radius: 8px; color: #4d7060 !important; background: #edf7f0; font-size: 10px !important; line-height: 1.45; }
+.rental-helper svg { flex: 0 0 auto; color: #318458; }
+.rental-alert { display: flex; gap: 7px; margin: 0; padding: 11px; border-radius: 8px; font-size: 10px; line-height: 1.4; }
+.rental-alert.error { color: #9c463a; background: #fff0ed; }
+.rental-status-card { display: flex; gap: 14px; padding: 20px; }
+.rental-status-card > svg { flex: 0 0 auto; color: #2e865b; }
+.rental-status-card > div { display: grid; gap: 9px; align-items: start; }
+.rental-status-card p { margin: 0; color: #718179; font-size: 11px; line-height: 1.55; }
+.rental-status-card dl, .rental-confirmation dl { display: flex; flex-wrap: wrap; gap: 18px; margin: 5px 0; }
+.rental-status-card dl div, .rental-confirmation dl div { display: grid; gap: 3px; }
+.rental-status-card dt, .rental-confirmation dt { color: #85938d; font-size: 8px; text-transform: uppercase; }
+.rental-status-card dd, .rental-confirmation dd { margin: 0; color: #3b574b; font-size: 10px; font-weight: 700; }
+.rental-summary { position: sticky; top: 18px; padding: 19px; background: #f2faf3; }
+.rental-summary h2 { margin: 0 0 15px; color: #2e4d40; font-size: 17px; }
+.rental-summary > div { display: grid; gap: 12px; }
+.rental-summary > div span { display: grid; grid-template-columns: 1fr auto auto; gap: 7px; align-items: center; color: #64776d; font-size: 10px; }
+.rental-summary > div span > b { color: #3c574b; }
+.rental-summary > div span > small { padding: 3px 4px; border-radius: 3px; color: #aa7a19; background: #fff3cf; font-size: 8px; }
+.rental-summary > strong { display: flex; justify-content: space-between; margin: 15px 0 12px; padding-top: 14px; border-top: 1px solid #cee0d2; color: #486459; font-size: 11px; }
+.rental-summary > strong b { color: #164937; font-size: 20px; }
+.rental-summary > p { display: flex; gap: 8px; margin: 0 0 14px; padding: 11px; border-radius: 8px; color: #537365; background: #e2f2e6; font-size: 9px; line-height: 1.5; }
+.rental-summary > p svg { flex: 0 0 auto; }
+.rental-summary > p b { display: block; font-size: 10px; }
+.rental-summary [data-slot=button] { width: 100%; font-size: 10px; }
+.rental-summary-note { display: block; margin-top: 10px; color: #84948b; font-size: 8px; text-align: center; }
+.application-list { display: grid; gap: 10px; }
+.application-list article { display: flex; gap: 15px; align-items: center; justify-content: space-between; padding: 17px; }
+.application-list article > span { display: grid; gap: 7px; }
+.application-list h2 { margin: 0; color: #315044; font-size: 15px; }
+.application-list p { display: flex; gap: 5px; align-items: center; margin: 0; color: #7b8a82; font-size: 10px; }
+.application-list [data-slot=button] { font-size: 10px; }
+.rental-empty, .rental-confirmation { display: grid; justify-items: center; align-content: center; gap: 9px; min-height: 290px; max-width: 780px; margin: 28px auto; padding: 28px; color: #34805a; text-align: center; }
+.rental-empty h1, .rental-confirmation h1 { margin: 0; color: #2c4c3f; font-size: 22px; }
+.rental-empty p, .rental-confirmation p { max-width: 500px; margin: 0; color: #718179; font-size: 11px; line-height: 1.55; }
+.rental-empty.error { color: #b44b3d; border-color: #f0c9c2; }
+.rental-empty.error h1 { color: #844036; }
+.rental-confirmation { max-width: 630px; }
+.rental-confirmation > svg { color: #2d885b; }
+.rental-confirmation > dl { justify-content: center; padding: 14px; border-radius: 9px; background: #f2f8f3; }
+.single-field { max-width: 420px; margin: 15px 0; }
+.manager-application-grid { display: grid; grid-template-columns: 285px minmax(0, 1fr); min-height: 500px; border: 1px solid #dce8df; border-radius: 14px; overflow: hidden; background: #fff; }
+.manager-application-list { display: grid; align-content: start; gap: 4px; padding: 12px; border-right: 1px solid #dce8df; background: #fbfdfb; }
+.manager-application-list button { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 11px; border: 0; border-radius: 8px; color: #51685d; background: transparent; text-align: left; }
+.manager-application-list button.active { background: #e9f4ec; }
+.manager-application-list button span { display: grid; gap: 5px; }
+.manager-application-list button b { color: #345448; font-size: 11px; }
+.manager-application-list button small { color: #84918a; font-size: 9px; }
+.manager-application-detail { display: grid; align-content: start; gap: 15px; padding: 22px; }
+.manager-application-detail h2 { margin: 7px 0 4px; color: #304f43; font-size: 20px; }
+.manager-application-detail > div > p { display: flex; gap: 5px; align-items: center; margin: 0; color: #839189; font-size: 10px; }
+.manager-application-detail dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 14px; border-radius: 10px; background: #f4f8f4; }
+.manager-application-detail dl div { display: grid; gap: 3px; }
+.manager-application-detail dt { color: #83918a; font-size: 8px; text-transform: uppercase; }
+.manager-application-detail dd { overflow: hidden; margin: 0; color: #36564a; font-size: 10px; font-weight: 700; text-overflow: ellipsis; }
+.manager-note { display: grid; gap: 5px; margin: 0; padding: 12px; border-left: 3px solid #8ec4a1; color: #5d7268; background: #f5faf6; font-size: 10px; line-height: 1.5; }
+.manager-note b { color: #3e5b4e; }
+.manager-actions { display: grid; gap: 10px; max-width: 460px; padding-top: 3px; }
+.manager-actions label { display: grid; gap: 6px; color: #62746b; font-size: 10px; font-weight: 700; }
+.manager-actions textarea { min-height: 70px; padding: 9px; resize: vertical; font-size: 10px; }
+.manager-actions [data-slot=button] { justify-self: start; font-size: 10px; }
+.transaction-history-page { max-width: 1050px; }
+.transaction-list { display: grid; gap: 12px; }
+.transaction-list > article { padding: 17px; border: 1px solid #dce8df; border-radius: 13px; background: #fff; }
+.transaction-list > article > header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.transaction-list > article > header > span { display: flex; gap: 9px; align-items: flex-start; color: #2f7754; }
+.transaction-list > article > header > span > span { display: grid; gap: 3px; }
+.transaction-list > article h2 { margin: 0; color: #315044; font-size: 15px; }
+.transaction-list > article small { color: #819087; font-size: 9px; }
+.transaction-list > article > dl { display: grid; grid-template-columns: 1.6fr repeat(3, 1fr); gap: 9px; margin: 15px 0 0; padding: 12px; border-radius: 8px; background: #f4f8f4; }
+.transaction-list > article dl div { display: grid; gap: 4px; min-width: 0; }
+.transaction-list > article dt { color: #849188; font-size: 8px; letter-spacing: .04em; text-transform: uppercase; }
+.transaction-list > article dd { overflow: hidden; margin: 0; color: #3b574b; font-size: 10px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.transaction-reference dd { color: #246846 !important; }
+.transaction-list code, .transaction-audit code, .transaction-payouts code { overflow-wrap: anywhere; color: #36594a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
+.transaction-audit { display: grid; gap: 5px; margin-top: 11px; padding: 10px; border-radius: 8px; color: #567268; background: #edf7f0; }
+.transaction-audit > b { color: #315d49; font-size: 10px; }
+.transaction-audit small { line-height: 1.4; }
+.transaction-payouts { margin-top: 13px; }
+.transaction-payouts h3 { margin: 0 0 7px; color: #3b594c; font-size: 11px; text-transform: capitalize; }
+.transaction-payouts ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.transaction-payouts li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; padding: 9px 0; border-top: 1px solid #edf1ed; }
+.transaction-payouts li > span:first-child { display: grid; gap: 3px; }
+.transaction-payouts li > span:first-child b { color: #466054; font-size: 10px; text-transform: capitalize; }
+.transaction-payout-amount { display: flex; gap: 7px; align-items: center; }
+.transaction-payout-amount > b { color: #3e594d; font-size: 10px; }
+.transaction-payouts li code { grid-column: 1 / -1; }
+.transaction-actions { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: center; margin-top: 13px; padding-top: 13px; border-top: 1px solid #e9efea; }
+.transaction-actions [data-slot=button] { font-size: 10px; }
+.transaction-actions small { color: #708179; font-size: 9px; line-height: 1.45; }
+.escrow-settlement { display: grid; gap: 10px; margin-top: 13px; padding: 13px; border: 1px solid #d7e6da; border-radius: 9px; background: #fbfefb; }
+.escrow-settlement > header { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.escrow-settlement > header > span, .caution-return > span { display: flex; gap: 8px; color: #287354; }
+.escrow-settlement > header > span > span, .caution-return > span > span { display: grid; gap: 3px; }
+.escrow-settlement h3 { margin: 0; color: #345548; font-size: 12px; }
+.escrow-settlement > p { margin: 0; color: #6b7e74; font-size: 9px; line-height: 1.5; }
+.tenancy-settlement-state { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 10px; border-radius: 7px; background: #eef7f0; }
+.tenancy-settlement-state > span { display: grid; gap: 3px; }
+.tenancy-settlement-state b, .caution-return b { color: #36574a; font-size: 10px; }
+.tenancy-settlement-state small, .caution-return small { color: #74857c; font-size: 8px; }
+.tenancy-settlement-state [data-slot=button], .caution-return [data-slot=button], .caution-propose [data-slot=button], .tenant-deduction-actions [data-slot=button] { font-size: 9px; }
+.escrow-settlement-note { padding: 9px; border-left: 3px solid #b8cdbd; color: #657a6f !important; background: #f4f8f4; }
+.caution-deduction-list { display: grid; gap: 6px; }
+.caution-deduction-list h4 { margin: 0; color: #3e5d4f; font-size: 10px; }
+.caution-deduction-list article { display: grid; gap: 7px; padding: 10px; border: 1px solid #e2ebe3; border-radius: 7px; background: #fff; }
+.caution-deduction-list article > span:first-child { display: grid; gap: 3px; }
+.caution-deduction-list article b { color: #3f5b4e; font-size: 10px; }
+.caution-deduction-list article small { color: #7b8b82; font-size: 8px; line-height: 1.4; }
+.caution-evidence { color: #48715c !important; }
+.tenant-deduction-actions { display: grid; gap: 7px; margin-top: 2px; padding-top: 9px; border-top: 1px solid #ebf1ec; }
+.tenant-deduction-actions label, .caution-propose label { display: grid; gap: 4px; color: #5a7166; font-size: 8px; font-weight: 700; }
+.tenant-deduction-actions textarea, .caution-propose textarea, .caution-propose input { width: 100%; border: 1px solid #d3e1d6; border-radius: 6px; color: #365649; background: #fff; font: inherit; font-size: 9px; font-weight: 400; }
+.tenant-deduction-actions textarea, .caution-propose textarea { min-height: 52px; padding: 7px; resize: vertical; }
+.caution-propose input { height: 33px; padding: 0 7px; }
+.tenant-deduction-actions > span { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.caution-manager-actions { display: grid; gap: 8px; }
+.caution-return { display: flex; justify-content: space-between; gap: 9px; align-items: center; padding: 10px; border: 1px solid #d7e6da; border-radius: 7px; background: #f2f8f3; }
+.caution-propose { border: 1px solid #e1e9e2; border-radius: 7px; color: #456357; background: #fff; }
+.caution-propose summary { padding: 10px; cursor: pointer; font-size: 9px; font-weight: 700; }
+.caution-propose > div { display: grid; gap: 8px; padding: 0 10px 10px; }
+.payout-center { display: grid; gap: 10px; margin-bottom: 16px; padding: 17px; border: 1px solid #d9e7dc; border-radius: 13px; background: #fff; }
+.payout-center > header { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.payout-center > header > span { display: flex; gap: 9px; color: #2e7b56; }
+.payout-center > header > span > span { display: grid; gap: 3px; }
+.payout-center small { color: #7b8c83; font-size: 9px; }
+.payout-center h2 { margin: 0; color: #315044; font-size: 16px; }
+.payout-center > p { margin: 0; color: #6d8076; font-size: 10px; line-height: 1.5; }
+.payout-destination, .payout-destination-form { display: grid; gap: 9px; padding: 12px; border-radius: 9px; background: #f2f8f3; }
+.payout-destination { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; }
+.payout-destination > svg { color: #2c8058; }
+.payout-destination > span, .payout-destination-form > div { display: grid; gap: 3px; }
+.payout-destination b, .payout-destination-form b { color: #345448; font-size: 11px; }
+.payout-destination-form > div { grid-template-columns: auto minmax(0, 1fr); align-items: start; }
+.payout-destination-form > div > svg { grid-row: 1 / span 2; color: #2c8058; }
+.payout-destination-form label, .payout-nin { display: grid; gap: 5px; color: #5d7469; font-size: 9px; font-weight: 700; }
+.payout-destination-form input, .payout-destination-form select, .payout-nin input { height: 36px; padding: 0 9px; border: 1px solid #d2e1d5; border-radius: 7px; color: #345448; background: #fff; font: inherit; font-size: 10px; font-weight: 400; }
+.payout-destination-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.payout-destination-actions [data-slot=button], .payout-withdrawals [data-slot=button] { font-size: 10px; }
+.payout-withdrawals { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid #e8efea; }
+.payout-withdrawals h3 { margin: 0; color: #36574a; font-size: 12px; }
+.payout-withdrawals > p { margin: 0; color: #74847b; font-size: 9px; line-height: 1.45; }
+.payout-withdrawals > ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.payout-withdrawals li { display: flex; justify-content: space-between; gap: 9px; align-items: center; padding: 9px; border-radius: 8px; background: #f7faf7; }
+.payout-withdrawals li > span { display: grid; gap: 3px; min-width: 0; }
+.payout-withdrawals li b { color: #365649; font-size: 11px; }
+.payout-withdrawals li code { color: #416353; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; }
+.spin { animation: rental-spin .8s linear infinite; }
+@keyframes rental-spin { to { transform: rotate(360deg); } }
+@media (max-width: 850px) { .rental-flow-grid { grid-template-columns: 1fr; } .rental-summary { position: static; } .rental-flow-heading { margin-top: 18px; } .rental-flow-heading h1 { font-size: 25px; } }
+@media (max-width: 750px) { .manager-application-grid { grid-template-columns: 1fr; } .manager-application-list { border-right: 0; border-bottom: 1px solid #dce8df; } .manager-application-detail dl, .transaction-list > article > dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .rental-readonly, .rental-form-grid { grid-template-columns: 1fr; } .rental-flow-heading { display: grid; } .rental-listing-summary { align-items: flex-start; } .application-list article { display: grid; } .rental-summary > strong b { font-size: 18px; } .transaction-list > article > dl { grid-template-columns: 1fr; } .transaction-list > article > header, .transaction-actions { display: grid; } .payout-destination { grid-template-columns: auto minmax(0, 1fr); } .payout-destination [data-slot=button] { grid-column: 1 / -1; } }

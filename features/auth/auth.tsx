@@ -28,7 +28,7 @@ const roleCopy: Record<
 > = {
   tenant: {
     label: 'Tenant',
-    detail: 'Find and rent a verified home.',
+    detail: 'Find and rent a home.',
     destination: 'tenant',
   },
   landlord: {
@@ -90,10 +90,10 @@ function AuthLayout({
             <ShieldCheck size={28} />
           </i>
           <small>Built for trusted renting</small>
-          <h2>Every account is verified before it can transact.</h2>
+          <h2>Verify your email now. Confirm your identity when it matters.</h2>
           <p>
-            Phone and identity checks help keep tenants, agents and landlords
-            safer from the first conversation.
+            Your NIN is checked only when you first pay rent or withdraw funds,
+            so you can explore and set up your account first.
           </p>
         </div>
         <span>
@@ -143,7 +143,6 @@ export function SignIn({
     setError(null);
     try {
       const session = await api.auth.login({ email, password });
-      sessionStore.set(session);
       onAuthenticated(session);
     } catch (cause: unknown) {
       setError(cause instanceof ApiError ? cause.message : 'Unable to sign in right now.');
@@ -235,7 +234,7 @@ export function SignUp({ go }: { go: (view: View) => void }) {
       go={go}
       eyebrow="Create your account"
       title="Start with SingleRent"
-      copy="Set up your account, then complete identity verification for your role."
+      copy="Set up your account, choose your role, then confirm your email address."
     >
       <form className="auth-form" onSubmit={submit}>
         <div className="auth-name-fields">
@@ -345,7 +344,7 @@ export function AccountType({
       go={go}
       eyebrow="One last choice"
       title="How will you use SingleRent?"
-      copy="All account types must complete phone and identity verification."
+      copy="We will send a verification code to your email after you create your account."
     >
       <div className="role-picker">
         {choices.map(([id, Icon]) => (
@@ -366,7 +365,7 @@ export function AccountType({
         ))}
         <p>
           <ShieldCheck size={15} /> Your selected role determines your workspace
-          after verification.
+          after your email is verified.
         </p>
         <div className="auth-actions">
           <Button variant="ghost" onClick={() => go('sign-up')}>
@@ -387,9 +386,79 @@ export function AccountType({
               }
             }}
           >
-            {submitting ? 'Creating account…' : 'Continue to KYC'} <ArrowRight size={14} />
+            {submitting ? 'Creating account…' : 'Continue to email verification'} <ArrowRight size={14} />
           </Button>
         </div>
+      </div>
+    </AuthLayout>
+  );
+}
+
+export function EmailVerification({
+  go,
+  session,
+  onVerified,
+}: {
+  go: (view: View) => void;
+  session: ApiSession | null;
+  onVerified: (session: ApiSession) => void;
+}) {
+  const [challenge, setChallenge] = useState(session?.emailVerification ?? null);
+  const [code, setCode] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  if (!session) {
+    return (
+      <AuthLayout go={go} eyebrow="Email verification" title="Sign in to verify your email" copy="Use the email and password you registered with, then we will let you enter your verification code.">
+        <Button className="auth-submit" onClick={() => go('sign-in')}>Go to sign in <ArrowRight size={15} /></Button>
+      </AuthLayout>
+    );
+  }
+  const verify = async () => {
+    if (!challenge) {
+      setError('Request a new verification code first.');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.auth.confirmEmailVerification(session.accessToken, challenge.id, code);
+      // The API client may have refreshed this session before completing the request.
+      // Always retain the most recently rotated token pair.
+      const activeSession = sessionStore.get() ?? session;
+      const verifiedSession: ApiSession = { ...activeSession, user: { ...activeSession.user, emailVerified: true }, emailVerification: undefined };
+      onVerified(verifiedSession);
+    } catch (cause: unknown) {
+      setError(cause instanceof ApiError ? cause.message : 'Unable to verify your email right now.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const resend = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      setChallenge(await api.auth.resendEmailVerification(session.accessToken));
+      setCode('');
+    } catch (cause: unknown) {
+      setError(cause instanceof ApiError ? cause.message : 'Unable to issue a new verification code.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return (
+    <AuthLayout go={go} eyebrow="One quick check" title="Verify your email" copy={`Enter the six-digit code sent to ${session.user.email}.`}>
+      <div className="auth-form">
+        <label>
+          Verification code
+          <input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="123456" />
+        </label>
+        {challenge?.developmentCode && <p className="development-code">Development code: <b>{challenge.developmentCode}</b></p>}
+        {error && <p className="auth-error" role="alert">{error}</p>}
+        <Button className="auth-submit" disabled={submitting || code.length !== 6} onClick={verify}>
+          {submitting ? 'Verifying…' : 'Verify email'} <ArrowRight size={15} />
+        </Button>
+        <Button variant="ghost" disabled={submitting} onClick={resend}>Send a new code</Button>
       </div>
     </AuthLayout>
   );
@@ -416,14 +485,14 @@ export function KycFlow({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const labels = [
-    'Account details',
-    'Phone verification',
+    'Email verified',
+    'Start a transaction',
     'Dojah NIN check',
-    'Complete',
+    'Continue',
   ];
   const heading =
     step === 1
-      ? 'Confirm your details'
+      ? 'Identity verification happens later'
       : step === 2
         ? 'Verify your phone number'
         : step === 3
@@ -431,7 +500,7 @@ export function KycFlow({
           : 'Review verification';
   const copy =
     step === 1
-      ? `Your ${roleCopy[role].label.toLowerCase()} account needs a verified phone number and NIN before you can use its workspace.`
+      ? `You can use your ${roleCopy[role].label.toLowerCase()} workspace after confirming your email. SingleRent asks for NIN only before your first rent payment or withdrawal.`
       : step === 2
         ? `Enter the six-digit code sent to ${phone || 'your phone number'}.`
         : step === 3
@@ -447,11 +516,8 @@ export function KycFlow({
     setError(null);
     try {
       if (step === 1) {
-        await api.users.updateProfile(currentSession.accessToken, { firstName, lastName });
-        const challenge = await api.users.sendPhoneVerification(currentSession.accessToken, phone);
-        setChallengeId(challenge.id);
-        setDevelopmentCode(challenge.developmentCode ?? null);
-        setStep(2);
+        setError('Start a rent payment or payout withdrawal when you are ready to complete one-time NIN verification.');
+        return;
       } else if (step === 2) {
         if (!challengeId) throw new Error('Request a new phone verification code.');
         await api.users.confirmPhoneVerification(currentSession.accessToken, challengeId, code);

@@ -73,6 +73,14 @@ export class TenanciesService {
       });
       return saved;
     });
+    const recipients = [updated.tenantId, updated.landlordId, updated.agentId].filter((id): id is string => Boolean(id));
+    await Promise.all([...new Set(recipients)].map((userId) => this.notificationsService.create({
+      userId,
+      type: NotificationType.CAUTION_DISPUTE_UPDATED,
+      title: 'Tenancy completed — caution settlement is ready',
+      body: 'Review the caution balance: return it to the tenant or propose a documented deduction.',
+      data: { tenancyId: updated.id, applicationId: updated.applicationId },
+    })));
     return updated;
   }
 

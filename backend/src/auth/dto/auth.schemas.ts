@@ -41,8 +41,14 @@ export const refreshSchema = z.object({
 
 export const logoutSchema = refreshSchema;
 
+export const confirmEmailVerificationSchema = z.object({
+  challengeId: z.string().uuid(),
+  code: z.string().regex(/^\d{6}$/, 'Enter the six-digit email verification code'),
+});
+
 export type RegisterRequest = z.infer<typeof registerSchema>;
 export type LoginRequest = z.infer<typeof loginSchema>;
 export type GoogleAuthRequest = z.infer<typeof googleAuthSchema>;
 export type RefreshRequest = z.infer<typeof refreshSchema>;
 export type LogoutRequest = z.infer<typeof logoutSchema>;
+export type ConfirmEmailVerificationRequest = z.infer<typeof confirmEmailVerificationSchema>;
