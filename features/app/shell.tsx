@@ -147,8 +147,8 @@ export function Shell({
     : role === "landlord"
       ? [["Overview", "landlord", LayoutDashboard], ["My homes", "landlord-homes", Building2], ["Applications", "landlord-applications", FileText], ["Questions", "questions", MessageCircle], ["Transactions", "landlord-transactions", WalletCards]]
       : role === "agent"
-        ? [["Overview", "agent", LayoutDashboard], ["Managed homes", "agent-homes", Building2], ["Applications", "agent-applications", FileText], ["Enquiries", "assistant", MessageCircle], ["Transactions", "agent-transactions", WalletCards]]
-        : [["Overview", "admin", LayoutDashboard], ["Transactions", "admin-transactions", WalletCards], ["Property moderation", "admin-listings", Building2], ["Admin management", "admins", Users]];
+        ? [["Overview", "agent", LayoutDashboard], ["Managed homes", "agent-homes", Building2], ["Applications", "agent-applications", FileText], ["Questions", "questions", MessageCircle], ["Transactions", "agent-transactions", WalletCards]]
+        : [["Overview", "admin", LayoutDashboard], ["Identity reviews", "admin-identity-reviews", UserRound], ["Transactions", "admin-transactions", WalletCards], ["Payment releases", "escrow", WalletCards], ["Property moderation", "admin-listings", Building2], ["Conversations", "admin-conversations", MessageCircle], ["Admin management", "admins", Users]];
 
   return (
     <div className="shell">

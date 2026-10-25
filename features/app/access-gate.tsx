@@ -19,7 +19,7 @@ export function AccessGate({ open, onOpenChange, go }: { open: boolean; onOpenCh
         <DialogHeader>
           <i><ShieldCheck size={22} /></i>
           <DialogTitle>Sign in to continue</DialogTitle>
-          <DialogDescription>Sign in to ask questions, contact a landlord, save homes, or apply. NIN verification is only requested when you make your first rent payment or withdraw a payout.</DialogDescription>
+          <DialogDescription>Sign in to ask the Property Assistant questions, save homes, or apply. NIN verification is only requested when you make your first rent payment or withdraw a payout.</DialogDescription>
         </DialogHeader>
         <p><Check size={14} /> No KYC for property questions or messages <Check size={14} /> KYC is only needed for payment or payout</p>
         <DialogFooter>

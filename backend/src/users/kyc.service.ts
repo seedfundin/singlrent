@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { KycStatus, LedgerAccountCode, LedgerEntryType, Prisma, VerificationServiceChargeSource, VerificationServiceChargeStatus } from '@prisma/client';
+import { IdentityNameMatchStatus, KycStatus, LedgerAccountCode, LedgerEntryType, Prisma, PublisherVerificationMethod, VerificationServiceChargeSource, VerificationServiceChargeStatus } from '@prisma/client';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'crypto';
 import { AuditService } from '../common/database/audit.service';
 import { PrismaService } from '../common/database/prisma.service';
@@ -8,9 +8,11 @@ import { PaystackService } from '../integrations/paystack.service';
 import {
   ConfirmPhoneVerificationRequest,
   SendPhoneVerificationRequest,
+  SubmitIdentityRequest,
   SubmitNinRequest,
 } from './dto/user.schemas';
-import { DojahVerificationService, type DojahNinLookup } from './dojah-verification.service';
+import { DojahVerificationService, type DojahIdentityLookup } from './dojah-verification.service';
+import { compareIdentityName } from './identity-name-match';
 
 @Injectable()
 export class KycService {
@@ -87,12 +89,15 @@ export class KycService {
     throw new BadRequestException('Start NIN verification from a payment or payout. Each Dojah check has a ₦100 service fee.');
   }
 
-  async initializeTenantVerification(userId: string, input: SubmitNinRequest) {
+  async initializeTenantVerification(userId: string, input: SubmitIdentityRequest) {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, include: { kyc: true } });
     if (!user) throw new NotFoundException('User not found');
     this.assertEmailVerified(user.emailVerifiedAt);
     if (user.kyc?.status === KycStatus.VERIFIED) {
       throw new ConflictException('Your identity is already verified; no service fee is required');
+    }
+    if (user.kyc?.status === KycStatus.UNDER_REVIEW) {
+      throw new ConflictException('Your Dojah identity record is already awaiting an administrator name review. Do not start another paid attempt.');
     }
 
     const reference = `srk_${randomUUID().replace(/-/g, '')}`;
@@ -102,8 +107,9 @@ export class KycService {
         source: VerificationServiceChargeSource.TENANT_PAYMENT,
         amountKobo: KycService.SERVICE_FEE_KOBO,
         paystackReference: reference,
-        ninCiphertext: this.encrypt(input.nin),
-        ninLast4: input.nin.slice(-4),
+        identityMethod: input.method as PublisherVerificationMethod,
+        ninCiphertext: this.encrypt(input.identifier),
+        ninLast4: input.identifier.slice(-4),
       },
       select: { id: true, amountKobo: true, currency: true, paystackReference: true, status: true },
     });
@@ -149,9 +155,9 @@ export class KycService {
     if (charge.currency !== currency || charge.amountKobo !== amountKobo) {
       await this.prisma.verificationServiceCharge.update({
         where: { id: charge.id },
-        data: { status: VerificationServiceChargeStatus.FAILED, failureReason: 'Paystack amount or currency did not match the service-fee record' },
+        data: { status: VerificationServiceChargeStatus.FAILED, failureReason: 'Payment amount or currency did not match the service-fee record' },
       });
-      throw new ConflictException('Paystack amount or currency does not match the service-fee record');
+      throw new ConflictException('Payment amount or currency does not match the service-fee record');
     }
     if (charge.status === VerificationServiceChargeStatus.VERIFIED || charge.status === VerificationServiceChargeStatus.REJECTED) {
       return true;
@@ -172,7 +178,7 @@ export class KycService {
     if (!charge?.paystackReference) throw new NotFoundException('Verification service charge not found');
     const verification = await this.paystack.verifyTransaction(charge.paystackReference);
     if (verification.status !== 'success') {
-      throw new ConflictException('Paystack has not confirmed the ₦100 service-fee payment');
+      throw new ConflictException('We have not yet confirmed the ₦100 verification service fee');
     }
     await this.processTenantVerificationCharge(
       charge.paystackReference,
@@ -183,12 +189,15 @@ export class KycService {
     return this.getVerificationStatus(userId);
   }
 
-  async verifyPayoutWithdrawal(userId: string, payoutId: string, input: SubmitNinRequest) {
+  async verifyPayoutWithdrawal(userId: string, payoutId: string, input: SubmitIdentityRequest) {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, include: { kyc: true } });
     if (!user) throw new NotFoundException('User not found');
     this.assertEmailVerified(user.emailVerifiedAt);
     if (user.kyc?.status === KycStatus.VERIFIED) {
       return { verified: true, alreadyVerified: true };
+    }
+    if (user.kyc?.status === KycStatus.UNDER_REVIEW) {
+      return { verified: false, underReview: true };
     }
 
     const charge = await this.prisma.$transaction(async (transaction) => {
@@ -223,8 +232,9 @@ export class KycService {
           status: VerificationServiceChargeStatus.PROCESSING,
           amountKobo: KycService.SERVICE_FEE_KOBO,
           providerReference: `dojah_${randomUUID()}`,
-          ninCiphertext: this.encrypt(input.nin),
-          ninLast4: input.nin.slice(-4),
+          identityMethod: input.method as PublisherVerificationMethod,
+          ninCiphertext: this.encrypt(input.identifier),
+          ninLast4: input.identifier.slice(-4),
           paidAt: new Date(),
         },
       });
@@ -241,7 +251,14 @@ export class KycService {
         select: { id: true, source: true, status: true, amountKobo: true, currency: true, failureReason: true, createdAt: true, processedAt: true },
       }),
     ]);
-    return { status: kyc?.status ?? KycStatus.NOT_STARTED, verified: kyc?.status === KycStatus.VERIFIED, latestServiceCharge: latestCharge };
+    return {
+      status: kyc?.status ?? KycStatus.NOT_STARTED,
+      verified: kyc?.status === KycStatus.VERIFIED,
+      underReview: kyc?.status === KycStatus.UNDER_REVIEW,
+      identityMethod: kyc?.identityMethod ?? null,
+      nameMatchReason: kyc?.nameMatchReason ?? null,
+      latestServiceCharge: latestCharge,
+    };
   }
 
   async assertVerified(userId: string): Promise<void> {
@@ -252,7 +269,10 @@ export class KycService {
   }
 
   private async verifyChargeWithDojah(chargeId: string) {
-    const charge = await this.prisma.verificationServiceCharge.findUnique({ where: { id: chargeId } });
+    const charge = await this.prisma.verificationServiceCharge.findUnique({
+      where: { id: chargeId },
+      include: { user: { select: { firstName: true, lastName: true } } },
+    });
     if (!charge) throw new NotFoundException('Verification service charge not found');
     const providerReference = charge.providerReference ?? `dojah_${randomUUID()}`;
     const nin = this.decrypt(charge.ninCiphertext);
@@ -268,16 +288,22 @@ export class KycService {
           userId: charge.userId,
           ninCiphertext: charge.ninCiphertext,
           ninLast4: charge.ninLast4,
+          identityMethod: charge.identityMethod,
           ninStatus: KycStatus.PENDING,
           status: KycStatus.PENDING,
+          nameMatchStatus: IdentityNameMatchStatus.NOT_CHECKED,
+          nameMatchReason: null,
           providerReference,
           submittedAt: now,
         },
         update: {
           ninCiphertext: charge.ninCiphertext,
           ninLast4: charge.ninLast4,
+          identityMethod: charge.identityMethod,
           ninStatus: KycStatus.PENDING,
           status: KycStatus.PENDING,
+          nameMatchStatus: IdentityNameMatchStatus.NOT_CHECKED,
+          nameMatchReason: null,
           providerReference,
           submittedAt: now,
           verifiedAt: null,
@@ -287,9 +313,9 @@ export class KycService {
     });
     await this.audit.record({ actorUserId: charge.userId, action: 'kyc.dojah_started', entityType: 'verification_service_charge', entityId: charge.id });
 
-    let verification: DojahNinLookup;
+    let verification: DojahIdentityLookup;
     try {
-      verification = await this.dojahVerificationService.verifyNin(nin);
+      verification = await this.dojahVerificationService.verifyIdentity(charge.identityMethod, nin);
     } catch (error) {
       await this.prisma.verificationServiceCharge.update({
         where: { id: charge.id },
@@ -299,14 +325,23 @@ export class KycService {
       throw error;
     }
 
-    const verified = verification.verified;
-    const status = verified ? KycStatus.VERIFIED : KycStatus.REJECTED;
-    const rejectionReason = verified ? null : verification.reason;
+    const nameMatch = verification.verified
+      ? compareIdentityName(charge.user, verification.identityName)
+      : { status: IdentityNameMatchStatus.NOT_CHECKED, reason: null };
+    const verified = verification.verified && nameMatch.status === IdentityNameMatchStatus.MATCHED;
+    const underReview = verification.verified && !verified;
+    const status = verified
+      ? KycStatus.VERIFIED
+      : underReview
+        ? KycStatus.UNDER_REVIEW
+        : KycStatus.REJECTED;
+    const providerFailureReason = verification.verified ? null : verification.reason;
+    const rejectionReason = verified ? null : underReview ? nameMatch.reason : providerFailureReason;
     await this.prisma.$transaction(async (transaction) => {
       await transaction.verificationServiceCharge.update({
         where: { id: charge.id },
         data: {
-          status: verified ? VerificationServiceChargeStatus.VERIFIED : VerificationServiceChargeStatus.REJECTED,
+          status: verified || underReview ? VerificationServiceChargeStatus.VERIFIED : VerificationServiceChargeStatus.REJECTED,
           failureReason: rejectionReason,
           processedAt: new Date(),
         },
@@ -314,17 +349,32 @@ export class KycService {
       await transaction.kycProfile.update({
         where: { userId: charge.userId },
         data: verified
-          ? { status: KycStatus.VERIFIED, ninStatus: KycStatus.VERIFIED, verifiedAt: new Date(), rejectionReason: null }
-          : { status: KycStatus.REJECTED, ninStatus: KycStatus.REJECTED, verifiedAt: null, rejectionReason },
+          ? { status: KycStatus.VERIFIED, ninStatus: KycStatus.VERIFIED, nameMatchStatus: IdentityNameMatchStatus.MATCHED, nameMatchReason: null, verifiedAt: new Date(), rejectionReason: null }
+          : {
+            status,
+            ninStatus: status,
+            nameMatchStatus: nameMatch.status,
+            nameMatchReason: nameMatch.reason,
+            verifiedAt: null,
+            rejectionReason,
+          },
       });
     });
     await this.audit.record({
       actorUserId: charge.userId,
-      action: verified ? 'kyc.verified_via_dojah' : 'kyc.dojah_verification_rejected',
+      action: verified ? 'kyc.verified_via_dojah' : underReview ? 'kyc.name_mismatch_sent_for_review' : 'kyc.dojah_verification_rejected',
       entityType: 'verification_service_charge',
       entityId: charge.id,
+      metadata: { method: charge.identityMethod, nameMatchStatus: nameMatch.status },
     });
-    return { status, verified, provider: 'DOJAH' as const, providerReference, serviceFeeKobo: KycService.SERVICE_FEE_KOBO };
+    return {
+      status,
+      verified,
+      underReview,
+      provider: 'DOJAH' as const,
+      providerReference,
+      serviceFeeKobo: KycService.SERVICE_FEE_KOBO,
+    };
   }
 
   private assertEmailVerified(emailVerifiedAt: Date | null): void {

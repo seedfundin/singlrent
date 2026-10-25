@@ -32,6 +32,9 @@ import { TenanciesModule } from './tenancies/tenancies.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { IncidentsModule } from './incidents/incidents.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { DocumentsModule } from './documents/documents.module';
+import { InspectionsModule } from './inspections/inspections.module';
+import { MoveInModule } from './move-in/move-in.module';
 
 @Module({
   imports: [
@@ -59,6 +62,9 @@ import { DashboardModule } from './dashboard/dashboard.module';
     ReviewsModule,
     IncidentsModule,
     DashboardModule,
+    DocumentsModule,
+    InspectionsModule,
+    MoveInModule,
   ],
   controllers: [AppController],
   providers: [

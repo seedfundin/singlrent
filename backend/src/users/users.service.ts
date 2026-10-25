@@ -1,5 +1,5 @@
-import { ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { Prisma, RoleCode, User, UserStatus } from '@prisma/client';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { KycStatus, Prisma, PublisherVerificationStatus, RoleCode, User, UserStatus } from '@prisma/client';
 import { PrismaService } from '../common/database/prisma.service';
 
 export type UserWithRoles = Prisma.UserGetPayload<{
@@ -31,6 +31,7 @@ export class UsersService {
     lastName: string;
     passwordHash?: string;
     role: RoleCode;
+    dateOfBirth?: Date;
   }): Promise<User> {
     return this.prisma.$transaction(async (transaction) => {
       const user = await transaction.user.create({
@@ -55,7 +56,7 @@ export class UsersService {
         await transaction.landlordProfile.create({ data: { userId: user.id } });
       }
       if (input.role === RoleCode.AGENT) {
-        await transaction.agentProfile.create({ data: { userId: user.id } });
+        await transaction.agentProfile.create({ data: { userId: user.id, dateOfBirth: input.dateOfBirth } });
       }
       return user;
     });
@@ -72,6 +73,13 @@ export class UsersService {
     if (user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException('This account is not active');
     }
+  }
+
+  async deactivate(userId: string): Promise<void> {
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.user.update({ where: { id: userId }, data: { status: UserStatus.DEACTIVATED } });
+      await transaction.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+    });
   }
 
   async assertEmailVerified(userId: string): Promise<void> {
@@ -114,6 +122,23 @@ export class UsersService {
     },
   ) {
     return this.prisma.$transaction(async (transaction) => {
+      const current = await transaction.user.findUnique({
+        where: { id: userId },
+        select: {
+          firstName: true,
+          lastName: true,
+          kyc: { select: { status: true } },
+          publisherVerification: { select: { status: true } },
+        },
+      });
+      if (!current) throw new NotFoundException('User not found');
+      const changingLegalName = (input.firstName !== undefined && input.firstName.trim() !== current.firstName)
+        || (input.lastName !== undefined && input.lastName.trim() !== current.lastName);
+      const identityAlreadyVerified = current.kyc?.status === KycStatus.VERIFIED
+        || current.publisherVerification?.status === PublisherVerificationStatus.VERIFIED;
+      if (changingLegalName && identityAlreadyVerified) {
+        throw new ConflictException('Your legal name cannot be changed after identity verification. Contact SingleRent support if it needs correction.');
+      }
       await transaction.user.update({
         where: { id: userId },
         data: {

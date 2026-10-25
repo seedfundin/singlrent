@@ -1,9 +1,9 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../common/types/authenticated-user';
 import { ZodValidationPipe } from '../common/validation/zod-validation.pipe';
-import { ApplicationQuery, applicationQuerySchema, CreateApplicationRequest, createApplicationSchema, RejectApplicationRequest, rejectApplicationSchema } from './dto/application.schemas';
+import { ApplicationQuery, applicationQuerySchema, CreateApplicationRequest, createApplicationSchema, RejectApplicationRequest, rejectApplicationSchema, UpdateApplicationRequest, updateApplicationSchema } from './dto/application.schemas';
 import { ApplicationsService } from './applications.service';
 
 @ApiTags('Applications')
@@ -25,6 +25,15 @@ export class ApplicationsController {
   @Get('received')
   received(@CurrentUser() user: AuthenticatedUser, @Query(new ZodValidationPipe(applicationQuerySchema)) query: ApplicationQuery) {
     return this.applicationsService.received(user.userId, query);
+  }
+
+  @Patch(':applicationId')
+  update(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('applicationId') applicationId: string,
+    @Body(new ZodValidationPipe(updateApplicationSchema)) input: UpdateApplicationRequest,
+  ) {
+    return this.applicationsService.updatePending(user.userId, applicationId, input);
   }
 
   @Post(':applicationId/approve')

@@ -7,10 +7,10 @@ import { type RentalCheckout, formatNaira } from '@/lib/pricing';
 
 export function PaymentBreakdown({
   checkout,
-  onViewEscrow,
+  onViewPaymentProtection,
 }: {
   checkout: RentalCheckout;
-  onViewEscrow: () => void;
+  onViewPaymentProtection: () => void;
 }) {
   const isAgentManaged = checkout.listingSource === 'agent';
 
@@ -86,7 +86,8 @@ export function PaymentBreakdown({
             <b className="text-[#1f5545]">Where each amount goes:</b> the
             landlord receives the full listed rent; SingleRent receives the 5%
             platform fee; the agent receives 5% only when the listing is
-            agent-posted. The caution fee remains protected in escrow.
+            agent-posted. Your caution fee is held securely and remains
+            traceable throughout the tenancy.
           </p>
         </div>
       </div>
@@ -98,8 +99,8 @@ export function PaymentBreakdown({
           landlord&apos;s listed rent.
         </span>
       </div>
-      <Button className="mt-5 w-full" onClick={onViewEscrow}>
-        View escrow terms <ArrowRight size={15} />
+      <Button className="mt-5 w-full" onClick={onViewPaymentProtection}>
+        How your payment is protected <ArrowRight size={15} />
       </Button>
     </motion.aside>
   );

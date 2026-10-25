@@ -6,6 +6,7 @@ import { ArrowLeft, ArrowRight, Check, CircleAlert, CircleCheck, MapPin } from "
 import { Button } from "@/components/ui/button";
 import { Shell, Status } from "@/features/app/shell";
 import { useAppSession } from "@/features/app/app-provider";
+import { InspectionSettings } from "@/features/inspections/inspections";
 import { GoogleAddressAutocomplete } from "@/features/maps/google-address-autocomplete";
 import { GooglePropertyMap, type PropertyCoordinates } from "@/features/maps/google-property-map";
 import { ApiFieldError } from "@/features/forms/api-field-error";
@@ -211,5 +212,6 @@ export function ListingEditor({ go, manager }: { go: Go; manager: Manager }) {
       <div className="editor-section"><span><small>Availability</small><h2>Rental terms</h2></span><div className="rules"><label>Available from<input type="date" value={form.availableFrom} onChange={(event) => update("availableFrom", event.target.value)} /></label><label>Minimum lease (months)<input aria-invalid={Boolean(fieldErrors.minimumLeaseMonths)} type="number" min="1" max="36" value={form.minimumLeaseMonths} onChange={(event) => update("minimumLeaseMonths", Math.max(1, Math.min(36, Number(event.target.value) || 1)))} /><ApiFieldError errors={fieldErrors} field="minimumLeaseMonths" /></label></div><p className="editor-media-note"><CircleCheck size={14} /> {listing.media.length} existing media file{listing.media.length === 1 ? "" : "s"} will remain attached to this listing.</p></div>
       <div className="actions"><Button variant="ghost" disabled={saving} onClick={() => go(views.home, { listing: listing.id })}>Cancel</Button><Button disabled={saving} onClick={() => void save()}>{saving ? "Publishing changes…" : "Save and publish changes"} <ArrowRight size={14} /></Button></div>
     </section>
+    {session && <InspectionSettings listingId={listing.id} token={session.accessToken} />}
   </div></Shell>;
 }

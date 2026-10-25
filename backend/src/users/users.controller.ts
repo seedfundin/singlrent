@@ -12,6 +12,8 @@ import {
   dojahWidgetWebhookSchema,
   SendPhoneVerificationRequest,
   sendPhoneVerificationSchema,
+  SubmitIdentityRequest,
+  submitIdentitySchema,
   SubmitNinRequest,
   StartPublisherVerificationRequest,
   startPublisherVerificationSchema,
@@ -83,7 +85,7 @@ export class UsersController {
   @Post("me/kyc/service-charge")
   initializeTransactionalKyc(
     @CurrentUser() user: AuthenticatedUser,
-    @Body(new ZodValidationPipe(submitNinSchema)) input: SubmitNinRequest,
+    @Body(new ZodValidationPipe(submitIdentitySchema)) input: SubmitIdentityRequest,
   ) {
     return this.kycService.initializeTenantVerification(user.userId, input);
   }

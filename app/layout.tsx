@@ -15,6 +15,9 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: 'SingleRent — Nigerian rental platform',
+  manifest: '/manifest.webmanifest',
+  icons: { icon: '/singlerent-icon-192.png', apple: '/singlerent-icon-192.png' },
+  appleWebApp: { capable: true, title: 'SingleRent', statusBarStyle: 'default' },
   description:
     'Find verified Nigerian rental homes and make secure rental payments.',
 };

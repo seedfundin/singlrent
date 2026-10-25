@@ -21,6 +21,7 @@ import type { AccountRole } from '@/lib/account';
 import type { View } from '@/lib/routes';
 import { api, ApiError, type ApiSession, type NinVerificationResult, registrationDraftStore, sessionStore } from '@/lib/api';
 import './auth.css';
+import './auth-overrides.css';
 
 const roleCopy: Record<
   AccountRole,
@@ -136,7 +137,14 @@ export function SignIn({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [resetStage, setResetStage] = useState<'login' | 'request' | 'confirm'>('login');
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetChallengeId, setResetChallengeId] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setSubmitting(true);
@@ -150,6 +158,47 @@ export function SignIn({
       setSubmitting(false);
     }
   };
+  const requestReset = async (event: FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await api.auth.requestPasswordReset(resetEmail);
+      setResetChallengeId(result.challengeId ?? '');
+      setNotice('If that email belongs to an account, a six-digit reset code has been sent.');
+      setResetStage('confirm');
+      if (result.developmentCode) setResetCode(result.developmentCode);
+    } catch (cause: unknown) {
+      setError(cause instanceof ApiError ? cause.message : 'Unable to request a password reset right now.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const confirmReset = async (event: FormEvent) => {
+    event.preventDefault();
+    if (resetPassword !== resetConfirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.auth.confirmPasswordReset({ email: resetEmail, challengeId: resetChallengeId, code: resetCode, password: resetPassword, confirmPassword: resetConfirmPassword });
+      setResetStage('login');
+      setPassword('');
+      setNotice('Your password has been reset. Sign in with your new password.');
+    } catch (cause: unknown) {
+      setError(cause instanceof ApiError ? cause.message : 'Unable to reset the password. Check the code and try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  if (resetStage === 'request') return <AuthLayout go={go} eyebrow="Account recovery" title="Reset your password" copy="Enter your email and we will send a six-digit code if an account exists.">
+    <form className="auth-form" onSubmit={requestReset}><label>Email address<input type="email" autoComplete="email" value={resetEmail} onChange={(event) => setResetEmail(event.target.value)} required /></label>{error && <p className="auth-error" role="alert">{error}</p>}<Button className="auth-submit" type="submit" disabled={submitting}>{submitting ? 'Sending…' : 'Send reset code'} <ArrowRight size={15} /></Button><p className="auth-switch"><button type="button" onClick={() => { setResetStage('login'); setError(null); }}>Back to sign in</button></p></form>
+  </AuthLayout>;
+  if (resetStage === 'confirm') return <AuthLayout go={go} eyebrow="Account recovery" title="Choose a new password" copy={`Enter the code sent to ${resetEmail}. It expires after 10 minutes.`}>
+    <form className="auth-form" onSubmit={confirmReset}><label>Reset code<input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, '').slice(0, 6))} required /></label><label>New password<input type="password" autoComplete="new-password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} minLength={12} required /></label><label>Confirm new password<input type="password" autoComplete="new-password" value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} minLength={12} required /></label>{notice && <p className="development-code">{notice}</p>}{error && <p className="auth-error" role="alert">{error}</p>}<Button className="auth-submit" type="submit" disabled={submitting || resetCode.length !== 6}>{submitting ? 'Resetting…' : 'Reset password'} <ArrowRight size={15} /></Button><p className="auth-switch"><button type="button" onClick={() => { setResetStage('request'); setError(null); }}>Use a different email</button></p></form>
+  </AuthLayout>;
   return (
     <AuthLayout
       go={go}
@@ -170,7 +219,7 @@ export function SignIn({
           />
         </label>
         <label>
-          Password<span className="label-action">Forgot password?</span>
+          Password<button type="button" className="label-action" onClick={() => { setResetEmail(email); setError(null); setNotice(null); setResetStage('request'); }}>Forgot password?</button>
           <div className="password-field">
             <input
               type={showPassword ? 'text' : 'password'}
@@ -189,6 +238,7 @@ export function SignIn({
           </div>
         </label>
         {error && <p className="auth-error" role="alert">{error}</p>}
+        {notice && <p className="development-code">{notice}</p>}
         <Button type="submit" className="auth-submit" disabled={submitting}>
           {submitting ? 'Signing in…' : 'Sign in'} <ArrowRight size={15} />
         </Button>
@@ -332,6 +382,7 @@ export function AccountType({
   onChoose: (role: AccountRole) => Promise<void>;
 }) {
   const [role, setRole] = useState<AccountRole>('tenant');
+  const [dateOfBirth, setDateOfBirth] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const choices: [AccountRole, LucideIcon][] = [
@@ -367,6 +418,7 @@ export function AccountType({
           <ShieldCheck size={15} /> Your selected role determines your workspace
           after your email is verified.
         </p>
+        {role === 'agent' && <label className="agent-birth-date">Date of birth<input type="date" value={dateOfBirth} onChange={(event) => setDateOfBirth(event.target.value)} required /></label>}
         <div className="auth-actions">
           <Button variant="ghost" onClick={() => go('sign-up')}>
             <ArrowLeft size={14} /> Back
@@ -378,6 +430,12 @@ export function AccountType({
               setSubmitting(true);
               setError(null);
               try {
+                if (role === 'agent' && !dateOfBirth) {
+                  setError('Agents must provide a date of birth and be at least 18 years old.');
+                  return;
+                }
+                const draft = registrationDraftStore.get();
+                if (draft) registrationDraftStore.set({ ...draft, dateOfBirth: role === 'agent' ? dateOfBirth : undefined });
                 await onChoose(role);
               } catch (cause: unknown) {
                 setError(cause instanceof ApiError ? cause.message : 'Unable to create your account right now.');

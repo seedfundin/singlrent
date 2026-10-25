@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { AuthenticatedUser } from '../common/types/authenticated-user';
@@ -19,6 +20,12 @@ import {
   registerSchema,
   ConfirmEmailVerificationRequest,
   confirmEmailVerificationSchema,
+  ConfirmPasswordResetRequest,
+  confirmPasswordResetSchema,
+  DeactivateAccountRequest,
+  deactivateAccountSchema,
+  RequestPasswordResetRequest,
+  requestPasswordResetSchema,
 } from './dto/auth.schemas';
 
 @ApiTags('Authentication')
@@ -89,6 +96,7 @@ export class AuthController {
   }
 
   @Post('email-verification')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @HttpCode(200)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Confirm the email OTP issued after registration' })
@@ -100,10 +108,41 @@ export class AuthController {
   }
 
   @Post('email-verification/resend')
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
   @HttpCode(200)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Issue a replacement email verification OTP' })
   resendEmailVerification(@CurrentUser() currentUser: AuthenticatedUser) {
     return this.authService.resendEmailVerification(currentUser);
+  }
+
+  @Public()
+  @Post('password-reset/request')
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @HttpCode(202)
+  requestPasswordReset(
+    @Body(new ZodValidationPipe(requestPasswordResetSchema)) input: RequestPasswordResetRequest,
+    @Req() request: Request,
+  ) {
+    return this.authService.requestPasswordReset(input, request);
+  }
+
+  @Public()
+  @Post('password-reset/confirm')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(200)
+  confirmPasswordReset(
+    @Body(new ZodValidationPipe(confirmPasswordResetSchema)) input: ConfirmPasswordResetRequest,
+  ) {
+    return this.authService.confirmPasswordReset(input);
+  }
+
+  @Post('me/deactivate')
+  @HttpCode(204)
+  deactivateAccount(
+    @CurrentUser() currentUser: AuthenticatedUser,
+    @Body(new ZodValidationPipe(deactivateAccountSchema)) input: DeactivateAccountRequest,
+  ): Promise<void> {
+    return this.authService.deactivateAccount(currentUser, input);
   }
 }

@@ -11,15 +11,26 @@ export interface PayoutJob {
 export class PayoutJobsService {
   constructor(@InjectQueue(PAYOUTS_QUEUE) private readonly payoutsQueue: Queue<PayoutJob>) {}
 
-  enqueue(payoutId: string): Promise<void> {
-    return this.payoutsQueue
+  async enqueue(payoutId: string): Promise<void> {
+    const jobId = `payout-${payoutId}`;
+    const existing = await this.payoutsQueue.getJob(jobId);
+    if (existing) {
+      const state = await existing.getState();
+      if (state === 'waiting' || state === 'active' || state === 'delayed') return;
+      // A completed or failed job with this durable ID will otherwise make
+      // BullMQ return the old job, leaving a newly scheduled payout stuck.
+      await existing.remove();
+    }
+    await this.payoutsQueue
       .add('execute-payout', { payoutId }, {
-        jobId: `payout:${payoutId}`,
+        // BullMQ reserves colons in custom job IDs. A dash keeps this stable
+        // for de-duplication without preventing a scheduled payout from
+        // entering the queue.
+        jobId,
         attempts: 5,
         backoff: { type: 'exponential', delay: 10_000 },
         removeOnComplete: 1_000,
         removeOnFail: 5_000,
-      })
-      .then(() => undefined);
+      });
   }
 }

@@ -61,6 +61,7 @@ function loadDojahWidget(): Promise<DojahConnectConstructor> {
 function readableStatus(status: ApiPublisherVerification["status"]) {
   if (status === "NOT_STARTED") return "Not started";
   if (status === "PENDING") return "In progress";
+  if (status === "UNDER_REVIEW") return "Name review required";
   if (status === "VERIFIED") return "Verified";
   if (status === "REJECTED") return "Needs another attempt";
   return "Could not complete";
@@ -117,8 +118,10 @@ export function PublisherVerificationGate({
       const next = await api.users.reconcilePublisherVerification(session.accessToken, verificationId);
       setVerification(next);
       if (next.verified) {
-        setNotice("Dojah confirmed your identity and liveness. You can now create a listing.");
+        setNotice("Dojah confirmed your identity, name match and liveness. You can now create a listing.");
         onVerified();
+      } else if (next.status === "UNDER_REVIEW") {
+        setNotice("Dojah confirmed the identity record, but its name needs an administrator review before listing access can be granted.");
       } else if (next.status === "PENDING") {
         setNotice("Dojah has received your flow. We are waiting for its verified result—do not start a second attempt yet.");
       } else {
@@ -168,7 +171,7 @@ export function PublisherVerificationGate({
         },
         onError: () => setError("Dojah could not complete this verification. Check the identity details and camera permissions, then try again."),
         onClose: () => {
-          if (!successCallback.current) setNotice("Verification was closed before completion. You can resume with a new secure attempt when ready.");
+          if (!successCallback.current) setNotice("Verification was closed before completion. Resume this same secure session when you are ready; do not start another one.");
         },
       });
       connect.setup();
@@ -185,12 +188,12 @@ export function PublisherVerificationGate({
   }
 
   if (verification?.verified) {
-    return <div className="page publisher-verification-page"><section className="publisher-verification-card success"><BadgeCheck size={28} /><div><Status>Publisher identity verified</Status><h1>You can list a property</h1><p>Dojah has confirmed the selected identity method and live selfie. This check is retained for future listings.</p></div></section></div>;
+    return <div className="page publisher-verification-page"><section className="publisher-verification-card success"><BadgeCheck size={28} /><div><Status>Publisher identity verified</Status><h1>You can list a property</h1><p>Dojah has confirmed the selected identity method, legal-name match and live selfie. This check is retained for future listings.</p></div></section></div>;
   }
 
   const pending = verification?.status === "PENDING" && verification.id;
   return <div className="page publisher-verification-page">
-    <div className="publisher-verification-heading"><span><small>Required before listing</small><h1>Verify your {role} account</h1><p>Before you can create or submit a property, Dojah must confirm a NIN or BVN and that you are physically present.</p></span><Status tone="gold"><ShieldCheck size={13} /> {verification ? readableStatus(verification.status) : "Not started"}</Status></div>
+    <div className="publisher-verification-heading"><span><small>Required before listing</small><h1>Verify your {role} account</h1><p>Before you can create or submit a property, Dojah must confirm a NIN or BVN, your legal first and last name, and that you are physically present.</p></span><Status tone="gold"><ShieldCheck size={13} /> {verification ? readableStatus(verification.status) : "Not started"}</Status></div>
     <section className="publisher-verification-card">
       <div className="publisher-verification-steps"><span><i><Fingerprint size={17} /></i><b>1. Identity</b><small>Choose NIN or BVN</small></span><span><i><Camera size={17} /></i><b>2. Liveness</b><small>Complete Dojah's live selfie check</small></span><span><i><CheckCircle2 size={17} /></i><b>3. Listing access</b><small>Unlocked only after Dojah confirms both</small></span></div>
       {error && <p className="publisher-verification-alert error"><CircleAlert size={16} /> {error}</p>}
@@ -204,9 +207,9 @@ export function PublisherVerificationGate({
       </fieldset>
       <div className="publisher-verification-actions">
         {pending && <Button variant="outline" disabled={checking || opening} onClick={() => void reconcile()}>{checking ? <><LoaderCircle className="spin" size={15} /> Checking Dojah…</> : <>Check verification result</>}</Button>}
-        <Button disabled={opening || checking} onClick={() => void openDojah()}>{opening ? <><LoaderCircle className="spin" size={15} /> Opening Dojah…</> : <><ShieldCheck size={15} /> {pending ? "Start a new attempt" : `Verify with ${method} and liveness`}</>}</Button>
+        <Button disabled={opening || checking} onClick={() => void openDojah()}>{opening ? <><LoaderCircle className="spin" size={15} /> Opening Dojah…</> : <><ShieldCheck size={15} /> {pending ? "Resume secure verification" : `Verify with ${method} and liveness`}</>}</Button>
       </div>
-      <p className="publisher-verification-footnote">Your Dojah EasyOnboard flow must be published with both <b>NIN</b> and <b>BVN</b> government-data options plus the <b>Liveness</b> fraud check. A completed browser screen alone never grants listing access.</p>
+      <p className="publisher-verification-footnote">Your Dojah EasyOnboard flow must be published with both <b>NIN</b> and <b>BVN</b> government-data options plus the <b>Liveness</b> fraud check. The legal first and last name returned by Dojah must match the name on this account; material differences are held for admin review. A completed browser screen alone never grants listing access.</p>
     </section>
   </div>;
 }

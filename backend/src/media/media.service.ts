@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DeleteObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
 import { ListingMediaType, RoleCode } from '@prisma/client';
@@ -13,8 +13,10 @@ import {
 
 const imageMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const videoMimeTypes = new Set(['video/mp4', 'video/webm', 'video/quicktime']);
+const agreementMimeTypes = new Set(['application/pdf']);
 const imageMaximumBytes = 5 * 1024 * 1024;
 const videoMaximumBytes = 50 * 1024 * 1024;
+const agreementMaximumBytes = 10 * 1024 * 1024;
 const uploadExpirySeconds = 10 * 60;
 
 type ListingMediaInput = {
@@ -44,7 +46,7 @@ export class MediaService {
   async createPresignedUpload(userId: string, input: CreatePresignedUploadRequest) {
     this.assertRequestedMedia(input.mediaType, input.mimeType, input.size);
     await this.assertUploadAuthorization(userId, input);
-    const configuration = this.r2Configuration();
+    const configuration = input.kind === 'move_in' || input.kind === 'guarantor' ? this.privateR2Configuration() : this.r2Configuration();
     const objectKey = this.createObjectKey(input.kind, userId, input.mimeType);
     const uploadUrl = await getSignedUrl(
       this.r2Client(configuration),
@@ -61,7 +63,9 @@ export class MediaService {
       mediaType: input.mediaType,
       mimeType: input.mimeType,
       uploadUrl,
-      publicUrl: this.publicUrl(configuration.publicUrl, objectKey),
+      // Agreement uploads are not returned through the public media domain.
+      // Their keys are consumed only by authenticated agreement endpoints.
+      publicUrl: input.kind === 'agreement' || input.kind === 'move_in' || input.kind === 'guarantor' ? undefined : this.publicUrl(configuration.publicUrl, objectKey),
       expiresAt: new Date(Date.now() + uploadExpirySeconds * 1000).toISOString(),
     };
   }
@@ -107,22 +111,26 @@ export class MediaService {
   }
 
   async deleteUnassociatedUpload(userId: string, objectKey: string): Promise<void> {
-    const kind = (['listing', 'maintenance', 'profile', 'incident'] as const).find((candidate) =>
+    const kind = (['listing', 'maintenance', 'profile', 'incident', 'agreement', 'guarantor'] as const).find((candidate) =>
       objectKey.startsWith(`${this.objectPrefix(candidate)}/${userId}/`),
     );
     if (!kind) {
       throw new BadRequestException('Media asset does not belong to this account');
     }
-    if (kind !== 'listing' && kind !== 'maintenance') {
+    if (kind !== 'listing' && kind !== 'maintenance' && kind !== 'agreement' && kind !== 'guarantor') {
       throw new ForbiddenException('This type of media cannot be removed through the unassociated upload endpoint');
     }
     const associated = kind === 'listing'
       ? await this.prisma.listingMedia.findUnique({ where: { objectKey }, select: { id: true } })
-      : await this.prisma.maintenanceAttachment.findUnique({ where: { publicId: objectKey }, select: { id: true } });
+      : kind === 'maintenance'
+        ? await this.prisma.maintenanceAttachment.findUnique({ where: { publicId: objectKey }, select: { id: true } })
+        : kind === 'agreement'
+          ? await this.prisma.agreementSignature.findFirst({ where: { uploadedDocumentUrl: objectKey }, select: { id: true } })
+          : await this.prisma.guarantorForm.findFirst({ where: { OR: [{ passportObjectKey: objectKey }, { uploadedSignedCopyObjectKey: objectKey }] }, select: { id: true } });
     if (associated) {
       throw new ForbiddenException('This media file is already attached and cannot be removed as an unassociated upload');
     }
-    await this.deleteObject(objectKey);
+    await this.deleteObject(objectKey, kind === 'guarantor');
   }
 
   async deleteListingObject(userId: string, objectKey: string): Promise<void> {
@@ -138,7 +146,98 @@ export class MediaService {
     }
   }
 
+  async prepareAgreementDocument(userId: string, tenancyId: string, objectKey: string): Promise<void> {
+    this.assertOwnedObjectKey(objectKey, userId, 'agreement');
+    const tenancy = await this.prisma.tenancy.findFirst({
+      where: { id: tenancyId, OR: [{ tenantId: userId }, { landlordId: userId }, { agentId: userId }] },
+      select: { id: true },
+    });
+    if (!tenancy) throw new ForbiddenException('Only tenancy participants can attach a signed agreement');
+    const object = await this.headObject(this.r2Configuration(), objectKey);
+    const mimeType = object.ContentType?.split(';')[0]?.trim().toLowerCase();
+    const bytes = object.ContentLength;
+    if (!mimeType || bytes === undefined || !Number.isFinite(bytes)) {
+      throw new BadRequestException('Unable to validate the uploaded signed agreement');
+    }
+    this.assertRequestedMedia('DOCUMENT', mimeType, bytes);
+  }
+
+  async prepareGuarantorPassport(userId: string, tenancyId: string, objectKey: string): Promise<void> {
+    this.assertOwnedObjectKey(objectKey, userId, 'guarantor');
+    await this.assertTenantForGuarantorUpload(userId, tenancyId);
+    const object = await this.headObject(this.privateR2Configuration(), objectKey);
+    const mimeType = object.ContentType?.split(';')[0]?.trim().toLowerCase();
+    const bytes = object.ContentLength;
+    if (!mimeType || bytes === undefined || !Number.isFinite(bytes)) {
+      throw new BadRequestException('Unable to validate the guarantor passport photograph');
+    }
+    this.assertRequestedMedia('IMAGE', mimeType, bytes);
+  }
+
+  async prepareGuarantorSignedCopy(userId: string, tenancyId: string, objectKey: string): Promise<void> {
+    this.assertOwnedObjectKey(objectKey, userId, 'guarantor');
+    await this.assertTenantForGuarantorUpload(userId, tenancyId);
+    const object = await this.headObject(this.privateR2Configuration(), objectKey);
+    const mimeType = object.ContentType?.split(';')[0]?.trim().toLowerCase();
+    const bytes = object.ContentLength;
+    if (!mimeType || bytes === undefined || !Number.isFinite(bytes)) {
+      throw new BadRequestException('Unable to validate the signed guarantor form');
+    }
+    this.assertRequestedMedia('DOCUMENT', mimeType, bytes);
+  }
+
+  async privateDownloadUrl(objectKey: string): Promise<{ downloadUrl: string; expiresAt: string }> {
+    const configuration = this.r2Configuration();
+    const downloadUrl = await getSignedUrl(
+      this.r2Client(configuration),
+      new GetObjectCommand({ Bucket: configuration.bucketName, Key: objectKey }),
+      { expiresIn: uploadExpirySeconds },
+    );
+    return { downloadUrl, expiresAt: new Date(Date.now() + uploadExpirySeconds * 1000).toISOString() };
+  }
+
+  async prepareMoveInEvidence(userId: string, objectKey: string): Promise<void> {
+    this.assertOwnedObjectKey(objectKey, userId, 'move_in');
+    const object = await this.headObject(this.privateR2Configuration(), objectKey);
+    const mimeType = object.ContentType?.split(';')[0]?.trim().toLowerCase();
+    const bytes = object.ContentLength;
+    if (!mimeType || bytes === undefined || !Number.isFinite(bytes)) throw new BadRequestException('Unable to validate evidence');
+    const type = imageMimeTypes.has(mimeType) ? 'IMAGE' : videoMimeTypes.has(mimeType) ? 'VIDEO' : null;
+    if (!type) throw new BadRequestException('Evidence must be an image or video');
+    this.assertRequestedMedia(type, mimeType, bytes);
+  }
+
+  async moveInEvidenceDownloadUrl(objectKey: string) {
+    const configuration = this.privateR2Configuration();
+    const downloadUrl = await getSignedUrl(this.r2Client(configuration), new GetObjectCommand({ Bucket: configuration.bucketName, Key: objectKey }), { expiresIn: uploadExpirySeconds });
+    return { downloadUrl, expiresAt: new Date(Date.now() + uploadExpirySeconds * 1000).toISOString() };
+  }
+
   private async assertUploadAuthorization(userId: string, input: CreatePresignedUploadRequest): Promise<void> {
+    if (input.kind === 'move_in') {
+      if (!input.tenancyId || input.mediaType === 'DOCUMENT') throw new BadRequestException('A tenancy and image or video are required');
+      const tenancy = await this.prisma.tenancy.findFirst({ where: { id: input.tenancyId, OR: [{ tenantId: userId }, { landlordId: userId }, { agentId: userId }] }, select: { id: true } });
+      if (!tenancy) throw new ForbiddenException('Only tenancy participants can upload evidence');
+      return;
+    }
+    if (input.kind === 'agreement') {
+      if (!input.tenancyId) throw new BadRequestException('A tenancy is required for a signed agreement upload');
+      if (input.mediaType !== 'DOCUMENT') throw new BadRequestException('Signed agreements must be uploaded as PDF documents');
+      const tenancy = await this.prisma.tenancy.findFirst({
+        where: { id: input.tenancyId, OR: [{ tenantId: userId }, { landlordId: userId }, { agentId: userId }] },
+        select: { id: true },
+      });
+      if (!tenancy) throw new ForbiddenException('Only tenancy participants can upload a signed agreement');
+      return;
+    }
+    if (input.kind === 'guarantor') {
+      if (!input.tenancyId) throw new BadRequestException('A tenancy is required for a guarantor form upload');
+      if (input.mediaType !== 'IMAGE' && input.mediaType !== 'DOCUMENT') {
+        throw new BadRequestException('The guarantor form accepts a passport image or signed PDF document');
+      }
+      await this.assertTenantForGuarantorUpload(userId, input.tenancyId);
+      return;
+    }
     if (input.kind !== 'listing') return;
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -170,6 +269,12 @@ export class MediaService {
   }
 
   private assertRequestedMedia(mediaType: RequestedMediaType | ListingMediaType, mimeType: string, bytes: number): void {
+    if (mediaType === 'DOCUMENT') {
+      if (!agreementMimeTypes.has(mimeType) || bytes > agreementMaximumBytes) {
+        throw new BadRequestException('A signed agreement must be a PDF no larger than 10 MB.');
+      }
+      return;
+    }
     if (mediaType === 'IMAGE') {
       if (!imageMimeTypes.has(mimeType) || bytes > imageMaximumBytes) {
         throw new BadRequestException('Each image must be JPEG, PNG or WebP and no larger than 5 MB.');
@@ -193,6 +298,7 @@ export class MediaService {
       'video/mp4': 'mp4',
       'video/webm': 'webm',
       'video/quicktime': 'mov',
+      'application/pdf': 'pdf',
     };
     const extension = extensions[mimeType];
     if (!extension) throw new BadRequestException('Unsupported media type');
@@ -205,6 +311,9 @@ export class MediaService {
       maintenance: 'maintenance',
       profile: 'profiles',
       incident: 'incidents',
+      agreement: 'agreements',
+      move_in: 'move-in-evidence',
+      guarantor: 'guarantor-forms',
     };
     return prefixes[kind];
   }
@@ -220,8 +329,8 @@ export class MediaService {
     }
   }
 
-  private async deleteObject(objectKey: string): Promise<void> {
-    const configuration = this.r2Configuration();
+  private async deleteObject(objectKey: string, privateObject = false): Promise<void> {
+    const configuration = privateObject ? this.privateR2Configuration() : this.r2Configuration();
     await this.r2Client(configuration).send(new DeleteObjectCommand({
       Bucket: configuration.bucketName,
       Key: objectKey,
@@ -238,6 +347,23 @@ export class MediaService {
       throw new ServiceUnavailableException('Cloudflare R2 media uploads are not configured');
     }
     return { accountId, accessKeyId, secretAccessKey, bucketName, publicUrl };
+  }
+
+  private privateR2Configuration() {
+    const configuration = this.r2Configuration();
+    const bucketName = this.configService.get<string>('CLOUDFLARE_R2_PRIVATE_BUCKET_NAME');
+    if (!bucketName || bucketName === configuration.bucketName) {
+      throw new ServiceUnavailableException('Private document storage is not configured. Set CLOUDFLARE_R2_PRIVATE_BUCKET_NAME to a separate, non-public Cloudflare R2 bucket.');
+    }
+    return { ...configuration, bucketName };
+  }
+
+  private async assertTenantForGuarantorUpload(userId: string, tenancyId: string): Promise<void> {
+    const tenancy = await this.prisma.tenancy.findFirst({
+      where: { id: tenancyId, tenantId: userId },
+      select: { id: true },
+    });
+    if (!tenancy) throw new ForbiddenException('Only the tenant can upload guarantor form documents');
   }
 
   private r2Client(configuration: ReturnType<MediaService['r2Configuration']>): S3Client {

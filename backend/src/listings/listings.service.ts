@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { ListingAvailability, ListingSource, ListingStatus, Prisma, RoleCode } from '@prisma/client';
+import { ApplicationStatus, ListingAvailability, ListingSource, ListingStatus, Prisma, ReviewStatus, ReviewTargetType, RoleCode } from '@prisma/client';
 import { parseKobo } from '../common/finance/money';
 import { pageResult, Paginated } from '../common/http/pagination';
 import { AuditService } from '../common/database/audit.service';
@@ -17,6 +17,8 @@ const listingInclude = {
 } satisfies Prisma.ListingInclude;
 
 type ListingWithRelations = Prisma.ListingGetPayload<{ include: typeof listingInclude }>;
+type ListingReputation = { score: number; propertyReviewCount: number; landlordReviewCount: number; label: 'NEW' | 'ESTABLISHED' };
+type ListingWithReputation = ListingWithRelations & { reputation: ListingReputation };
 
 @Injectable()
 export class ListingsService {
@@ -28,7 +30,7 @@ export class ListingsService {
     private readonly pricingService: PricingService,
   ) {}
 
-  async search(query: ListingQuery): Promise<Paginated<ListingWithRelations>> {
+  async search(query: ListingQuery): Promise<Paginated<ListingWithRelations | ListingWithReputation>> {
     const where: Prisma.ListingWhereInput = {
       status: ListingStatus.PUBLISHED,
       availability: query.availability ?? ListingAvailability.AVAILABLE,
@@ -45,6 +47,20 @@ export class ListingsService {
           : undefined,
       amenities: query.amenities ? { hasEvery: query.amenities.split(',').map((value) => value.trim()).filter(Boolean) } : undefined,
     };
+    if (query.sort === 'RECOMMENDED') {
+      // The bounded candidate set prevents a reputation sort from becoming an
+      // unbounded in-memory query. It is explicitly opt-in and uses a neutral
+      // Bayesian baseline so a new landlord is not pushed down for having no
+      // reviews. Search relevance filters have already been applied in `where`.
+      const [candidates, total] = await this.prisma.$transaction([
+        this.prisma.listing.findMany({ where, include: listingInclude, orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }], take: 500 }),
+        this.prisma.listing.count({ where }),
+      ]);
+      const scored = await this.withReputation(candidates);
+      scored.sort((left, right) => right.reputation.score - left.reputation.score || Number(right.publishedAt) - Number(left.publishedAt));
+      const offset = (query.page - 1) * query.pageSize;
+      return pageResult(scored.slice(offset, offset + query.pageSize), total, query);
+    }
     const [items, total] = await this.prisma.$transaction([
       this.prisma.listing.findMany({
         where,
@@ -58,6 +74,37 @@ export class ListingsService {
     return pageResult(items, total, query);
   }
 
+  private async withReputation(items: ListingWithRelations[]): Promise<ListingWithReputation[]> {
+    if (!items.length) return [];
+    const listingIds = items.map((item) => item.id);
+    const landlordIds = [...new Set(items.map((item) => item.landlordId))];
+    const [propertyRows, landlordRows] = await this.prisma.$transaction([
+      this.prisma.review.groupBy({ where: { status: ReviewStatus.PUBLISHED, targetType: ReviewTargetType.LISTING, listingId: { in: listingIds } }, by: ['listingId'], orderBy: { listingId: 'asc' }, _avg: { score: true }, _count: { _all: true } }),
+      this.prisma.review.groupBy({ where: { status: ReviewStatus.PUBLISHED, targetType: ReviewTargetType.LANDLORD, targetUserId: { in: landlordIds } }, by: ['targetUserId'], orderBy: { targetUserId: 'asc' }, _avg: { score: true }, _count: { _all: true } }),
+    ]);
+    const aggregateCount = (count: unknown) => typeof count === 'object' && count !== null && '_all' in count && typeof count._all === 'number' ? count._all : 0;
+    const property = new Map(propertyRows.filter((row) => row.listingId).map((row) => [row.listingId!, { average: row._avg?.score ?? 0, count: aggregateCount(row._count) }]));
+    const landlord = new Map(landlordRows.filter((row) => row.targetUserId).map((row) => [row.targetUserId!, { average: row._avg?.score ?? 0, count: aggregateCount(row._count) }]));
+    const confidenceScore = (average: number, count: number) => {
+      const baseline = 3.5;
+      return baseline + (count / (count + 5)) * (average - baseline);
+    };
+    return items.map((item) => {
+      const propertyScore = property.get(item.id) ?? { average: 3.5, count: 0 };
+      const landlordScore = landlord.get(item.landlordId) ?? { average: 3.5, count: 0 };
+      const totalReviews = propertyScore.count + landlordScore.count;
+      return {
+        ...item,
+        reputation: {
+          score: Number((confidenceScore(propertyScore.average, propertyScore.count) * 0.6 + confidenceScore(landlordScore.average, landlordScore.count) * 0.4).toFixed(3)),
+          propertyReviewCount: propertyScore.count,
+          landlordReviewCount: landlordScore.count,
+          label: totalReviews ? 'ESTABLISHED' : 'NEW',
+        },
+      };
+    });
+  }
+
   async getByPublicId(idOrSlug: string, userId?: string): Promise<ListingWithRelations> {
     const listing = await this.prisma.listing.findFirst({
       where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
@@ -66,18 +113,27 @@ export class ListingsService {
     if (!listing) {
       throw new NotFoundException('Listing not found');
     }
-    if (listing.status !== ListingStatus.PUBLISHED && !this.canManage(listing, userId)) {
-      throw new NotFoundException('Listing not found');
+    if (listing.status === ListingStatus.PUBLISHED && listing.availability === ListingAvailability.AVAILABLE) {
+      return listing;
     }
-    return listing;
+    if (this.canManage(listing, userId)) {
+      return listing;
+    }
+    if (userId && await this.hasReservedAccess(listing.id, userId)) {
+      return listing;
+    }
+    // Reserved, rented, unpublished, and archived homes deliberately present
+    // the same result as an unknown public URL. This prevents someone who has
+    // saved an old link from discovering a home is no longer available.
+    throw new NotFoundException('Listing not found');
   }
 
   /**
    * Returns the server-authoritative rental quote for a published listing.
    * It deliberately does not create a payment or reserve the property.
    */
-  async publicPricing(idOrSlug: string) {
-    const listing = await this.getByPublicId(idOrSlug);
+  async publicPricing(idOrSlug: string, userId?: string) {
+    const listing = await this.getByPublicId(idOrSlug, userId);
     const pricing = this.pricingService.calculateRental({
       annualRentKobo: listing.annualRentKobo,
       cautionFeeKobo: listing.cautionFeeKobo,
@@ -332,7 +388,13 @@ export class ListingsService {
   }
 
   async saved(userId: string, query: ListingQuery): Promise<Paginated<ListingWithRelations>> {
-    const where: Prisma.ListingWhereInput = { savedBy: { some: { userId } } };
+    // Saved homes are still a marketplace surface, so reservations and rented
+    // homes must disappear here just as they do from Explore and map search.
+    const where: Prisma.ListingWhereInput = {
+      savedBy: { some: { userId } },
+      status: ListingStatus.PUBLISHED,
+      availability: ListingAvailability.AVAILABLE,
+    };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.listing.findMany({
         where,
@@ -344,6 +406,20 @@ export class ListingsService {
       this.prisma.listing.count({ where }),
     ]);
     return pageResult(items, total, query);
+  }
+
+  /** A small, authenticated lookup used by the public property-detail page. */
+  async savedState(userId: string, idOrSlug: string): Promise<{ saved: boolean }> {
+    const listing = await this.prisma.listing.findFirst({
+      where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }], status: ListingStatus.PUBLISHED },
+      select: { id: true },
+    });
+    if (!listing) throw new NotFoundException('Listing not found');
+    const saved = await this.prisma.savedListing.findUnique({
+      where: { userId_listingId: { userId, listingId: listing.id } },
+      select: { listingId: true },
+    });
+    return { saved: Boolean(saved) };
   }
 
   private async findManagedListing(listingId: string, userId: string) {
@@ -359,6 +435,25 @@ export class ListingsService {
 
   private canManage(listing: { landlordId: string; createdById: string; managingAgentId: string | null }, userId?: string): boolean {
     return Boolean(userId && [listing.landlordId, listing.createdById, listing.managingAgentId].includes(userId));
+  }
+
+  private async hasReservedAccess(listingId: string, userId: string): Promise<boolean> {
+    const application = await this.prisma.rentalApplication.findFirst({
+      where: {
+        listingId,
+        tenantId: userId,
+        status: {
+          in: [
+            ApplicationStatus.PAYMENT_HELD,
+            ApplicationStatus.APPROVED,
+            ApplicationStatus.ACTIVE,
+            ApplicationStatus.COMPLETED,
+          ],
+        },
+      },
+      select: { id: true },
+    });
+    return Boolean(application);
   }
 
   private async getRoleCodes(userId: string): Promise<RoleCode[]> {

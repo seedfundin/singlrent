@@ -7,6 +7,8 @@ import {
   EscrowStatus,
   LedgerAccountCode,
   LedgerEntryType,
+  ListingAvailability,
+  ListingStatus,
   NotificationType,
   PaymentProvider,
   PaymentStatus,
@@ -28,6 +30,13 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { RealtimeGateway } from '../websocket/realtime.gateway';
 import { KycService } from '../users/kyc.service';
 import { UsersService } from '../users/users.service';
+import { AgreementsService } from '../documents/agreements.service';
+import { ReceiptsService } from '../documents/receipts.service';
+import {
+  CancellationRefundOutcome,
+  cancellationRefundAmounts,
+  canReleaseVerifiedEscrow,
+} from '../move-in/move-in.rules';
 import {
   CautionDeductionRequest,
   PaymentInitializationRequest,
@@ -70,6 +79,7 @@ type PaymentView = Omit<PaymentRecord, 'payouts'> & {
   payouts: PaymentRecord['payouts'];
 };
 const confirmableStatuses: PaymentStatus[] = [PaymentStatus.INITIALIZED, PaymentStatus.PENDING];
+const CANCELLATION_POLICY_VERSION = '2026-10-22';
 
 function jsonValue(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -90,9 +100,14 @@ export class PaymentsService {
     private readonly audit: AuditService,
     private readonly usersService: UsersService,
     private readonly kycService: KycService,
+    private readonly agreementsService: AgreementsService,
+    private readonly receiptsService: ReceiptsService,
   ) {}
 
   async initialize(tenantId: string, input: PaymentInitializationRequest) {
+    if (!input.cancellationPolicyAccepted) {
+      throw new ConflictException('Accept the cancellation and refund policy before payment');
+    }
     await this.usersService.assertEmailVerified(tenantId);
     try {
       await this.kycService.assertVerified(tenantId);
@@ -129,6 +144,8 @@ export class PaymentsService {
         landlordId: application.landlordId,
         agentId: application.agentId,
         ...pricing,
+        cancellationPolicyAcceptedAt: new Date(),
+        cancellationPolicyVersion: CANCELLATION_POLICY_VERSION,
       },
     });
     try {
@@ -166,7 +183,7 @@ export class PaymentsService {
     const verification = await this.paystack.verifyTransaction(payment.reference);
     if (verification.status !== 'success') {
       await this.markFailed(payment.id, jsonValue(verification.payload));
-      throw new ConflictException('Paystack has not confirmed this payment');
+      throw new ConflictException('We have not yet confirmed this payment');
     }
     const confirmed = await this.recordSuccessfulPayment(payment.reference, verification.amountKobo, verification.currency, jsonValue(verification.payload));
     return this.toViewerPayment(confirmed, userId);
@@ -202,14 +219,14 @@ export class PaymentsService {
 
   async authorizeRelease(managerId: string, paymentId: string): Promise<PaymentView> {
     const updated = await this.authorizeEscrowRelease(managerId, paymentId, false);
-    await this.notifyPaymentParticipants(updated, NotificationType.ESCROW_UPDATED, 'Escrow release authorized', 'The tenancy was approved. Landlord and agent payouts are now available to withdraw after one-time verification.');
+    await this.notifyPaymentParticipants(updated, NotificationType.ESCROW_UPDATED, 'Payment release authorized', 'The tenancy was approved. Landlord and agent payouts are now available to withdraw after one-time verification.');
     return this.toViewerPayment(updated, managerId);
   }
 
   async authorizeReleaseByAdmin(adminId: string, paymentId: string) {
     const updated = await this.authorizeEscrowRelease(adminId, paymentId, true);
     await this.audit.record({ actorUserId: adminId, action: 'escrow.release_authorized_by_admin', entityType: 'payment', entityId: paymentId });
-    await this.notifyPaymentParticipants(updated, NotificationType.ESCROW_UPDATED, 'Escrow release authorized', 'SingleRent operations authorized the release. Landlord and agent payouts are now available to withdraw after one-time verification.');
+    await this.notifyPaymentParticipants(updated, NotificationType.ESCROW_UPDATED, 'Payment release authorized', 'SingleRent operations authorized the release. Landlord and agent payouts are now available to withdraw after one-time verification.');
     return { ...updated, transactionReference: updated.reference };
   }
 
@@ -225,25 +242,39 @@ export class PaymentsService {
       throw new ForbiddenException('Only the landlord or managing agent can authorize fund release');
     }
     const escrow = payment.escrow;
-    if (payment.status !== PaymentStatus.SUCCESS || payment.application.status !== ApplicationStatus.PAYMENT_HELD || !escrow) {
-      throw new ConflictException('This payment is not ready for escrow release');
+    if (payment.status !== PaymentStatus.SUCCESS || (payment.application.status !== ApplicationStatus.PAYMENT_HELD && payment.application.status !== ApplicationStatus.ACTIVE) || !escrow) {
+      throw new ConflictException('This payment is not ready for release');
     }
 
     await this.prisma.$transaction(async (transaction) => {
+      await transaction.$queryRaw`SELECT id FROM "escrow_records" WHERE "paymentId" = ${paymentId}::uuid FOR UPDATE`;
+      const verification = await transaction.moveInVerification.findUnique({ where: { paymentId }, include: { tenancy: { include: { agreement: true, guarantorForm: true } }, issues: true, refundRequests: { where: { status: 'PENDING' } } } });
+      if (verification) {
+        const refundAllocations = await transaction.payout.count({ where: { paymentId, kind: { in: [PayoutKind.REFUND, PayoutKind.CAUTION_REFUND] }, status: { notIn: [PayoutStatus.CANCELLED, PayoutStatus.FAILED] } } });
+        const safe = canReleaseVerifiedEscrow({
+          actorIsAdmin: adminOverride, escrowHeld: escrow.status === EscrowStatus.HELD,
+          verificationApproved: verification.status === 'VERIFIED', agreementExecuted: verification.tenancy.agreement?.status === 'EXECUTED', guarantorFormExecuted: verification.tenancy.guarantorForm?.status === 'EXECUTED',
+          tenancyActive: verification.tenancy.status === 'ACTIVE', openRefundRequest: refundAllocations > 0 || verification.refundRequests.length > 0, adminHold: verification.adminHold,
+          issues: verification.issues.map((issue) => ({ severity: issue.severity as 'MINOR' | 'MAJOR' | 'CRITICAL', resolved: issue.status === 'RESOLVED', classificationDisputed: issue.classificationDisputed })),
+        });
+        if (!safe) throw new ConflictException('Payment release requires admin approval, completed verification, signed tenancy and guarantor documents, an active tenancy, and no open hold');
+      } else if (payment.application.status !== ApplicationStatus.PAYMENT_HELD) {
+        throw new ConflictException('This payment is not ready for release');
+      }
       const released = await transaction.escrowRecord.updateMany({
         where: { id: escrow.id, status: EscrowStatus.HELD },
         data: { status: EscrowStatus.RELEASE_SCHEDULED, releaseAuthorizedAt: new Date() },
       });
       if (released.count !== 1) {
-        throw new ConflictException('Escrow release has already been authorized');
+        throw new ConflictException('Payment release has already been authorized');
       }
-      await transaction.rentalApplication.update({
+      if (!verification) await transaction.rentalApplication.update({
         where: { id: payment.applicationId },
         data: { status: ApplicationStatus.APPROVED, decidedAt: new Date() },
       });
       await transaction.listing.update({ where: { id: payment.listingId }, data: { availability: 'RENTED' } });
       const endsAt = this.addMonths(payment.application.moveInDate, payment.application.leaseMonths);
-      await transaction.tenancy.upsert({
+      const tenancy = await transaction.tenancy.upsert({
         where: { applicationId: payment.applicationId },
         create: {
           applicationId: payment.applicationId,
@@ -256,6 +287,7 @@ export class PaymentsService {
         },
         update: {},
       });
+      await this.agreementsService.createForTenancy(transaction, tenancy.id);
       const payouts = await Promise.all([
         transaction.payout.create({
           data: {
@@ -296,7 +328,7 @@ export class PaymentsService {
   async proposeCautionDeduction(managerId: string, paymentId: string, input: CautionDeductionRequest) {
     const payment = await this.prisma.payment.findUnique({ where: { id: paymentId }, include: { escrow: { include: { cautionDeductions: true } }, application: { include: { tenancy: true } } } });
     if (!payment || !payment.escrow) {
-      throw new NotFoundException('Escrow payment not found');
+      throw new NotFoundException('Protected payment not found');
     }
     if (![payment.landlordId, payment.agentId].includes(managerId)) {
       throw new ForbiddenException('Only the landlord or managing agent can propose a caution deduction');
@@ -385,7 +417,7 @@ export class PaymentsService {
       where: { id: paymentId },
       include: { application: { include: { tenancy: true } }, escrow: { include: { cautionDeductions: true } }, payouts: true },
     });
-    if (!payment?.escrow) throw new NotFoundException('Escrow payment not found');
+    if (!payment?.escrow) throw new NotFoundException('Protected payment not found');
     if (![payment.landlordId, payment.agentId].includes(managerId)) {
       throw new ForbiddenException('Only the landlord or managing agent can return caution funds');
     }
@@ -408,7 +440,76 @@ export class PaymentsService {
   }
 
   async issueRefund(actorId: string, paymentId: string, input: RefundPaymentRequest) {
+    // New move-in transactions require the reviewed cancellation workflow.
+    // Do not let the legacy admin refund endpoint bypass it.
+    const verification = await this.prisma.moveInVerification.findUnique({ where: { paymentId }, select: { id: true } });
+    if (verification) throw new ConflictException('Use the reviewed move-in cancellation workflow for this payment');
     return this.scheduleRefund(actorId, paymentId, input, [EscrowStatus.HELD, EscrowStatus.PARTIALLY_SETTLED]);
+  }
+
+  async approveMoveInRefund(
+    adminId: string,
+    paymentId: string,
+    requestId: string,
+    reason: string,
+    outcome: CancellationRefundOutcome = 'TENANT_CHANGED_MIND',
+  ) {
+    if (reason.trim().length < 3) throw new ConflictException('A decision reason is required');
+    const payouts = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "escrow_records" WHERE "paymentId" = ${paymentId}::uuid FOR UPDATE`;
+      const payment = await tx.payment.findUnique({ where: { id: paymentId }, include: { escrow: { include: { cautionDeductions: true } }, tenant: { include: { payoutAccount: true } }, payouts: true, moveInVerification: { include: { tenancy: true, refundRequests: true } } } });
+      const verification = payment?.moveInVerification;
+      const request = verification?.refundRequests.find((item) => item.id === requestId);
+      if (!payment?.escrow || !verification || !request) throw new NotFoundException('Cancellation request not found');
+      if (payment.status !== PaymentStatus.SUCCESS || payment.escrow.status !== EscrowStatus.HELD || verification.tenancy.status !== 'PENDING_MOVE_IN' || request.status !== 'PENDING') throw new ConflictException('This cancellation request is no longer eligible for a refund');
+      if (!payment.tenant.payoutAccount) throw new PreconditionFailedException({ code: 'REFUND_DESTINATION_REQUIRED', message: 'The tenant must add a bank account before this refund can be sent.' });
+      const rent = this.availableRentRefundAmount(payment.escrow.rentHeldKobo, payment.payouts);
+      const caution = this.availableCautionRefundAmount(payment.escrow.cautionHeldKobo, payment.escrow.cautionDeductions, payment.payouts);
+      if (rent !== payment.escrow.rentHeldKobo || caution !== payment.escrow.cautionHeldKobo) throw new ConflictException('This payment has existing allocations and needs manual review');
+      const calculation = cancellationRefundAmounts(outcome, rent, caution);
+      const refundedFees = outcome === 'VALID_PROPERTY_FAILURE'
+        ? payment.platformFeeKobo + payment.agentFeeKobo + payment.legalFeeKobo
+        : 0n;
+      const created = [];
+      for (const part of [
+        { amount: calculation.rentRefundKobo + refundedFees, kind: PayoutKind.REFUND },
+        { amount: calculation.cautionRefundKobo, kind: PayoutKind.CAUTION_REFUND },
+      ]) {
+        if (part.amount <= 0n) continue;
+        const payout = await tx.payout.create({ data: { paymentId, recipientUserId: payment.tenantId, kind: part.kind, amountKobo: part.amount, status: PayoutStatus.SCHEDULED, scheduledAt: new Date() } });
+        created.push(payout);
+      }
+      const metadata = { actorId: adminId, reason: reason.trim(), outcome };
+      await this.ledger.record(tx, { paymentId, entryType: LedgerEntryType.REFUND_ISSUED, debitAccount: LedgerAccountCode.RENT_ESCROW, creditAccount: LedgerAccountCode.TENANT_REFUND_PAYABLE, amountKobo: calculation.rentRefundKobo, idempotencyKey: `move-in-refund:${requestId}:rent`, metadata });
+      await this.ledger.record(tx, { paymentId, entryType: LedgerEntryType.CAUTION_REFUND_ALLOCATED, debitAccount: LedgerAccountCode.CAUTION_ESCROW, creditAccount: LedgerAccountCode.TENANT_REFUND_PAYABLE, amountKobo: calculation.cautionRefundKobo, idempotencyKey: `move-in-refund:${requestId}:caution`, metadata });
+      await this.ledger.record(tx, { paymentId, entryType: LedgerEntryType.CANCELLATION_FEE_ALLOCATED, debitAccount: LedgerAccountCode.RENT_ESCROW, creditAccount: LedgerAccountCode.PLATFORM_REVENUE, amountKobo: calculation.rentCancellationFeeKobo, idempotencyKey: `move-in-refund:${requestId}:rent-cancellation-fee`, metadata: { ...metadata, scope: 'RENT' } });
+      await this.ledger.record(tx, { paymentId, entryType: LedgerEntryType.CANCELLATION_FEE_ALLOCATED, debitAccount: LedgerAccountCode.CAUTION_ESCROW, creditAccount: LedgerAccountCode.PLATFORM_REVENUE, amountKobo: calculation.cautionForfeitureKobo, idempotencyKey: `move-in-refund:${requestId}:caution-forfeiture`, metadata: { ...metadata, scope: 'CAUTION' } });
+      await this.ledger.record(tx, { paymentId, entryType: LedgerEntryType.PLATFORM_FEE_REFUNDED, debitAccount: LedgerAccountCode.PLATFORM_REVENUE, creditAccount: LedgerAccountCode.TENANT_REFUND_PAYABLE, amountKobo: outcome === 'VALID_PROPERTY_FAILURE' ? payment.platformFeeKobo : 0n, idempotencyKey: `move-in-refund:${requestId}:platform-fee`, metadata });
+      await this.ledger.record(tx, { paymentId, entryType: LedgerEntryType.LEGAL_FEE_REFUNDED, debitAccount: LedgerAccountCode.LEGAL_FEE_REVENUE, creditAccount: LedgerAccountCode.TENANT_REFUND_PAYABLE, amountKobo: outcome === 'VALID_PROPERTY_FAILURE' ? payment.legalFeeKobo : 0n, idempotencyKey: `move-in-refund:${requestId}:legal-fee`, metadata });
+      await this.ledger.record(tx, { paymentId, entryType: LedgerEntryType.AGENT_FEE_REFUNDED, debitAccount: LedgerAccountCode.AGENT_PAYABLE, creditAccount: LedgerAccountCode.TENANT_REFUND_PAYABLE, amountKobo: outcome === 'VALID_PROPERTY_FAILURE' ? payment.agentFeeKobo : 0n, idempotencyKey: `move-in-refund:${requestId}:agent-fee`, metadata });
+      if (!created.length) throw new ConflictException('There is no refundable rent or caution balance');
+      await tx.moveInRefundRequest.update({ where: { id: requestId }, data: { status: 'APPROVED' } });
+      await tx.moveInVerification.update({ where: { id: verification.id }, data: { status: 'CANCELLED', adminHold: true } });
+      await tx.moveInEvent.create({ data: { verificationId: verification.id, actorId: adminId, type: 'REFUND_APPROVED', details: { requestId, reason: reason.trim(), outcome, rentRefundKobo: calculation.rentRefundKobo.toString(), cautionRefundKobo: calculation.cautionRefundKobo.toString(), platformFeeRefundKobo: outcome === 'VALID_PROPERTY_FAILURE' ? payment.platformFeeKobo.toString() : '0', legalFeeRefundKobo: outcome === 'VALID_PROPERTY_FAILURE' ? payment.legalFeeKobo.toString() : '0', agentFeeRefundKobo: outcome === 'VALID_PROPERTY_FAILURE' ? payment.agentFeeKobo.toString() : '0', rentCancellationFeeKobo: calculation.rentCancellationFeeKobo.toString(), cautionForfeitureKobo: calculation.cautionForfeitureKobo.toString() } } });
+      await tx.tenancy.update({ where: { id: verification.tenancyId }, data: { status: 'CANCELLED' } });
+      await tx.rentalApplication.update({ where: { id: payment.applicationId }, data: { status: 'CANCELLED' } });
+      // An approved pre-tenancy cancellation releases the reservation so the
+      // property may be rented by someone else again.
+      await tx.listing.updateMany({
+        where: { id: payment.listingId, status: { not: ListingStatus.ARCHIVED } },
+        data: { availability: ListingAvailability.AVAILABLE },
+      });
+      await tx.escrowRecord.update({ where: { id: payment.escrow.id }, data: { status: EscrowStatus.PARTIALLY_SETTLED } });
+      return created;
+    });
+    await this.audit.record({ actorUserId: adminId, action: 'move_in.refund_approved', entityType: 'payment', entityId: paymentId, metadata: { requestId, reason: reason.trim(), outcome } });
+    for (const payout of payouts) await this.payoutJobs.enqueue(payout.id);
+    const payment = await this.prisma.payment.findUniqueOrThrow({ where: { id: paymentId }, include: paymentInclude });
+    const message = outcome === 'VALID_PROPERTY_FAILURE'
+      ? 'The full refund, including rent, caution, platform, legal and agent fees, has been scheduled. It is not complete until the payment provider confirms it.'
+      : 'Your rent refund, less the 3% cancellation charge, has been scheduled. Caution, platform, legal and agent fees are not refunded. It is not complete until the payment provider confirms it.';
+    await this.notifyPaymentParticipants(payment, NotificationType.ESCROW_UPDATED, 'Cancellation refund approved', message);
+    return payouts;
   }
 
   private async scheduleRefund(actorId: string, paymentId: string, input: RefundPaymentRequest, allowedEscrowStatuses: EscrowStatus[]) {
@@ -416,6 +517,9 @@ export class PaymentsService {
     if (amountKobo <= 0n) throw new ConflictException('Refund amount must be greater than zero');
 
     const payout = await this.prisma.$transaction(async (transaction) => {
+      // Serialize balance checks with escrow release and other refund allocations.
+      // Re-read payment and payouts after acquiring the row lock, not before it.
+      await transaction.$queryRaw`SELECT id FROM "escrow_records" WHERE "paymentId" = ${paymentId}::uuid FOR UPDATE`;
       const payment = await transaction.payment.findUnique({
         where: { id: paymentId },
         include: {
@@ -425,10 +529,10 @@ export class PaymentsService {
         },
       });
       if (!payment?.escrow || payment.status !== PaymentStatus.SUCCESS) {
-        throw new ConflictException('Only a confirmed escrow payment can be refunded');
+        throw new ConflictException('Only a confirmed protected payment can be refunded');
       }
       if (!allowedEscrowStatuses.includes(payment.escrow.status)) {
-        throw new ConflictException('This escrow is not available for a refund');
+        throw new ConflictException('This protected payment is not available for a refund');
       }
       if (!payment.tenant.payoutAccount) {
         throw new PreconditionFailedException({
@@ -442,7 +546,7 @@ export class PaymentsService {
         ? this.availableCautionRefundAmount(payment.escrow.cautionHeldKobo, payment.escrow.cautionDeductions, payment.payouts)
         : this.availableRentRefundAmount(payment.escrow.rentHeldKobo, payment.payouts);
       if (amountKobo > availableAmount) {
-        throw new ConflictException(`Refund exceeds the available ${input.scope.toLowerCase()} escrow balance`);
+        throw new ConflictException(`Refund exceeds the available ${input.scope.toLowerCase()} balance`);
       }
 
       const created = await transaction.payout.create({
@@ -477,6 +581,7 @@ export class PaymentsService {
 
   async resolveCautionDispute(adminId: string, paymentId: string, deductionId: string, input: ResolveCautionDisputeRequest) {
     const result = await this.prisma.$transaction(async (transaction) => {
+      await transaction.$queryRaw`SELECT id FROM "escrow_records" WHERE "paymentId" = ${paymentId}::uuid FOR UPDATE`;
       const payment = await transaction.payment.findUnique({
         where: { id: paymentId },
         include: {
@@ -578,11 +683,11 @@ export class PaymentsService {
       if (event.event === 'charge.success') {
         const reference = typeof event.data.reference === 'string' ? event.data.reference : undefined;
         if (!reference) {
-          throw new ConflictException('Paystack webhook is missing its transaction reference');
+          throw new ConflictException('Payment webhook is missing its transaction reference');
         }
         const verified = await this.paystack.verifyTransaction(reference);
         if (verified.status !== 'success') {
-          throw new ConflictException('Paystack did not verify this payment as successful');
+          throw new ConflictException('The payment provider did not verify this payment as successful');
         }
         const serviceChargeHandled = await this.kycService.processTenantVerificationCharge(
           reference,
@@ -600,7 +705,7 @@ export class PaymentsService {
           await this.payoutExecutionService.markProviderResult(
             reference,
             event.event === 'transfer.success',
-            event.event === 'transfer.failed' ? 'Paystack transfer failed' : undefined,
+            event.event === 'transfer.failed' ? 'Bank transfer failed' : undefined,
           );
         }
       }
@@ -622,7 +727,7 @@ export class PaymentsService {
         throw new NotFoundException('Payment reference not found');
       }
       if (current.currency !== currency || current.totalAmountKobo !== amountKobo) {
-        throw new ConflictException('Paystack amount or currency does not match the server payment record');
+        throw new ConflictException('Payment amount or currency does not match the server payment record');
       }
       if (current.status === PaymentStatus.SUCCESS) {
         return current;
@@ -642,6 +747,36 @@ export class PaymentsService {
         return completed;
       }
       await transaction.rentalApplication.update({ where: { id: current.applicationId }, data: { status: ApplicationStatus.PAYMENT_HELD } });
+      // A confirmed escrow payment reserves this home immediately. The paying
+      // tenant can still access it through authenticated rental endpoints,
+      // but it must not remain available to other prospective tenants.
+      const reservation = await transaction.listing.updateMany({
+        where: {
+          id: current.listingId,
+          status: { not: ListingStatus.ARCHIVED },
+          availability: ListingAvailability.AVAILABLE,
+        },
+        data: { availability: ListingAvailability.UNAVAILABLE },
+      });
+      if (reservation.count !== 1) {
+        throw new ConflictException('This property is no longer available for payment');
+      }
+      // New payments start the move-in workflow. Existing successful payments
+      // return above and retain their legacy agreement and escrow handling.
+      const endsAt = this.addMonths(current.application.moveInDate, current.application.leaseMonths);
+      const tenancy = await transaction.tenancy.upsert({
+        where: { applicationId: current.applicationId },
+        create: {
+          applicationId: current.applicationId,
+          listingId: current.listingId,
+          tenantId: current.tenantId,
+          landlordId: current.landlordId,
+          agentId: current.agentId,
+          startsAt: current.application.moveInDate,
+          endsAt,
+        },
+        update: {},
+      });
       await transaction.escrowRecord.create({
         data: {
           paymentId: current.id,
@@ -650,6 +785,8 @@ export class PaymentsService {
           cautionStatus: current.cautionFeeKobo > 0n ? CautionStatus.HELD : CautionStatus.NOT_APPLICABLE,
         },
       });
+      const verification = await transaction.moveInVerification.create({ data: { tenancyId: tenancy.id, paymentId: current.id } });
+      await transaction.moveInEvent.create({ data: { verificationId: verification.id, actorId: current.tenantId, type: 'PAYMENT_HELD', details: {} } });
       await this.ledger.record(transaction, {
         paymentId: current.id,
         entryType: LedgerEntryType.RENT_ESCROW_HELD,
@@ -676,6 +813,14 @@ export class PaymentsService {
       });
       await this.ledger.record(transaction, {
         paymentId: current.id,
+        entryType: LedgerEntryType.LEGAL_FEE_ALLOCATED,
+        debitAccount: LedgerAccountCode.PAYMENT_CLEARING,
+        creditAccount: LedgerAccountCode.LEGAL_FEE_REVENUE,
+        amountKobo: current.legalFeeKobo,
+        idempotencyKey: `payment:${current.id}:legal-fee`,
+      });
+      await this.ledger.record(transaction, {
+        paymentId: current.id,
         entryType: LedgerEntryType.AGENT_COMMISSION_ALLOCATED,
         debitAccount: LedgerAccountCode.PAYMENT_CLEARING,
         creditAccount: LedgerAccountCode.AGENT_PAYABLE,
@@ -685,7 +830,10 @@ export class PaymentsService {
       return transaction.payment.findUniqueOrThrow({ where: { id: current.id } });
     });
     const detailed = await this.prisma.payment.findUniqueOrThrow({ where: { id: payment.id }, include: paymentInclude });
-    await this.notifyPaymentParticipants(detailed, NotificationType.PAYMENT_SUCCESSFUL, 'Payment confirmed and held in escrow', 'Your rent payment was verified and is protected in escrow pending release authorization.');
+    // The receipt upsert is keyed by payment and receipt kind, so webhook
+    // delivery and manual verification retries cannot produce duplicates.
+    await this.receiptsService.issueTenantPaymentReceipt(detailed.id);
+    await this.notifyPaymentParticipants(detailed, NotificationType.PAYMENT_SUCCESSFUL, 'Payment confirmed and protected', 'Your rent payment was verified and is held securely while the required move-in steps are completed.');
     return detailed;
   }
 
@@ -751,14 +899,14 @@ export class PaymentsService {
 
   private verifyWebhookSignature(rawBody: Buffer, signature: string | undefined): void {
     if (!signature || !/^[a-f0-9]{128}$/i.test(signature)) {
-      throw new UnauthorizedException('Invalid Paystack webhook signature');
+      throw new UnauthorizedException('Invalid payment webhook signature');
     }
     const secret = this.paystackSecret();
     const expected = createHmac('sha512', secret).update(rawBody).digest('hex');
     const provided = Buffer.from(signature, 'hex');
     const expectedBuffer = Buffer.from(expected, 'hex');
     if (provided.length !== expectedBuffer.length || !timingSafeEqual(provided, expectedBuffer)) {
-      throw new UnauthorizedException('Invalid Paystack webhook signature');
+      throw new UnauthorizedException('Invalid payment webhook signature');
     }
   }
 
@@ -766,7 +914,7 @@ export class PaymentsService {
     // The Paystack client validates configuration during API calls; webhook verification needs the same secret before parsing the event.
     const secret = this.configService.get<string>('PAYSTACK_SECRET_KEY');
     if (!secret) {
-      throw new UnauthorizedException('Paystack webhook endpoint is not configured');
+      throw new UnauthorizedException('Payment webhook endpoint is not configured');
     }
     return secret;
   }

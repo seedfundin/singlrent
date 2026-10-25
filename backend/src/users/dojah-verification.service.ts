@@ -1,11 +1,15 @@
 import { BadGatewayException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { IdentityName } from './identity-name-match';
 
-export type DojahNinLookup =
-  | { verified: true; phoneNumber?: string }
+export type DojahIdentityMethod = 'NIN' | 'BVN';
+
+export type DojahIdentityLookup =
+  | { verified: true; method: DojahIdentityMethod; identityName: IdentityName; phoneNumber?: string }
   | { verified: false; reason: string };
 
-export type DojahPublisherMethod = 'NIN' | 'BVN';
+export type DojahNinLookup = DojahIdentityLookup;
+export type DojahPublisherMethod = DojahIdentityMethod;
 
 export type DojahHostedVerification = {
   referenceId: string;
@@ -16,6 +20,7 @@ export type DojahHostedVerification = {
   completed: boolean;
   terminal: boolean;
   passed: boolean;
+  identityName?: IdentityName;
   reason: string | null;
 };
 
@@ -28,12 +33,22 @@ export class DojahVerificationService {
   }
 
   async verifyNin(nin: string): Promise<DojahNinLookup> {
-    const { appId, secretKey } = this.requireCredentials('NIN verification');
+    return this.verifyIdentity('NIN', nin);
+  }
 
-    const url = new URL('/api/v1/kyc/nin', this.configService.getOrThrow<string>('DOJAH_BASE_URL'));
-    // Dojah requires the NIN as a query parameter. We never log this URL or the
-    // returned identity record, and only retain the encrypted NIN already held by KYC.
-    url.searchParams.set('nin', nin);
+  async verifyBvn(bvn: string): Promise<DojahIdentityLookup> {
+    return this.verifyIdentity('BVN', bvn);
+  }
+
+  async verifyIdentity(method: DojahIdentityMethod, identifier: string): Promise<DojahIdentityLookup> {
+    const { appId, secretKey } = this.requireCredentials(`${method} verification`);
+
+    const path = method === 'NIN' ? '/api/v1/kyc/nin' : '/api/v1/kyc/bvn/full';
+    const parameter = method.toLowerCase();
+    const url = new URL(path, this.configService.getOrThrow<string>('DOJAH_BASE_URL'));
+    // Dojah requires the identifier as a query parameter. We never log this URL
+    // or the returned identity record, and only retain the encrypted identifier.
+    url.searchParams.set(parameter, identifier);
     const response = await fetch(url, {
       headers: {
         Authorization: secretKey,
@@ -42,13 +57,13 @@ export class DojahVerificationService {
     }).catch(() => undefined);
 
     if (!response) {
-      throw new ServiceUnavailableException('Dojah NIN verification is temporarily unavailable');
+      throw new ServiceUnavailableException(`Dojah ${method} verification is temporarily unavailable`);
     }
     if (response.status === 400 || response.status === 404) {
-      return { verified: false, reason: 'Dojah could not find a valid NIN record.' };
+      return { verified: false, reason: `Dojah could not find a valid ${method} record.` };
     }
     if (response.status === 401 || response.status === 402 || response.status === 424 || response.status === 429 || !response.ok) {
-      throw new ServiceUnavailableException('Dojah NIN verification is temporarily unavailable');
+      throw new ServiceUnavailableException(`Dojah ${method} verification is temporarily unavailable`);
     }
 
     const payload = await this.readJson(response);
@@ -56,10 +71,11 @@ export class DojahVerificationService {
     const phoneNumber = entity ? this.readString(entity, 'phone_number') : undefined;
     const firstName = entity ? this.readString(entity, 'first_name') : undefined;
     const lastName = entity ? this.readString(entity, 'last_name') : undefined;
+    const middleName = entity ? this.readString(entity, 'middle_name') : undefined;
     if (!entity || !firstName || !lastName) {
-      throw new BadGatewayException('Dojah returned an incomplete NIN identity record');
+      throw new BadGatewayException(`Dojah returned an incomplete ${method} identity record`);
     }
-    return { verified: true, phoneNumber };
+    return { verified: true, method, identityName: { firstName, lastName, middleName }, phoneNumber };
   }
 
   /**
@@ -90,6 +106,7 @@ export class DojahVerificationService {
         completed: false,
         terminal: false,
         passed: false,
+        identityName: undefined,
         reason: null,
       };
     }
@@ -128,6 +145,7 @@ export class DojahVerificationService {
       this.readString(payload, 'verification_type'),
       governmentData ? Object.keys(this.asRecord(governmentData.data) ?? {}).join(' ') : undefined,
     );
+    const identityName = this.readHostedIdentityName(data, governmentData, method);
     const overallPassed = payload.status === true;
     const passed = completed && overallPassed && identityVerified && livenessVerified && method !== null;
     const message = this.readString(payload, 'message');
@@ -144,6 +162,7 @@ export class DojahVerificationService {
       completed,
       terminal,
       passed,
+      identityName,
       reason,
     };
   }
@@ -179,5 +198,37 @@ export class DojahVerificationService {
     if (/\bBVN\b/.test(normalized)) return 'BVN';
     if (/\bNIN\b/.test(normalized)) return 'NIN';
     return null;
+  }
+
+  /**
+   * EasyOnboard responses differ slightly between Dojah flow versions. Names
+   * are read only while comparing them, then discarded with the provider body.
+   */
+  private readHostedIdentityName(
+    data: Record<string, unknown> | undefined,
+    governmentData: Record<string, unknown> | undefined,
+    method: DojahPublisherMethod | null,
+  ): IdentityName | undefined {
+    const id = data ? this.asRecord(data.id) : undefined;
+    const idData = id ? this.asRecord(id.data) : undefined;
+    const governmentResult = governmentData ? this.asRecord(governmentData.data) : undefined;
+    const methodResult = governmentResult && method
+      ? this.asRecord(governmentResult[method.toLowerCase()])
+        ?? this.asRecord(governmentResult[method])
+      : undefined;
+    return this.readIdentityName(idData ? this.asRecord(idData.id_data) : undefined)
+      ?? this.readIdentityName(methodResult)
+      ?? this.readIdentityName(methodResult ? this.asRecord(methodResult.entity) : undefined)
+      ?? this.readIdentityName(methodResult ? this.asRecord(methodResult.data) : undefined)
+      ?? this.readIdentityName(governmentResult);
+  }
+
+  private readIdentityName(record: Record<string, unknown> | undefined): IdentityName | undefined {
+    if (!record) return undefined;
+    const firstName = this.readString(record, 'first_name');
+    const lastName = this.readString(record, 'last_name');
+    if (!firstName || !lastName) return undefined;
+    const middleName = this.readString(record, 'middle_name');
+    return { firstName, lastName, middleName };
   }
 }

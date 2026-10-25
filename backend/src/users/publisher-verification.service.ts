@@ -1,6 +1,7 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  IdentityNameMatchStatus,
   PublisherVerification,
   PublisherVerificationMethod,
   PublisherVerificationStatus,
@@ -11,6 +12,7 @@ import { AuditService } from '../common/database/audit.service';
 import { PrismaService } from '../common/database/prisma.service';
 import { DojahHostedVerification, DojahVerificationService } from './dojah-verification.service';
 import { DojahWidgetWebhookRequest, StartPublisherVerificationRequest } from './dto/user.schemas';
+import { compareIdentityName } from './identity-name-match';
 
 const publisherRoleCodes = new Set<RoleCode>([RoleCode.LANDLORD, RoleCode.AGENT]);
 
@@ -30,7 +32,6 @@ export class PublisherVerificationService {
       select: {
         emailVerifiedAt: true,
         userRoles: { select: { role: { select: { code: true } } } },
-        publisherVerification: true,
       },
     });
     if (!user) throw new NotFoundException('User not found');
@@ -40,42 +41,75 @@ export class PublisherVerificationService {
     if (!user.emailVerifiedAt) {
       throw new ForbiddenException('Verify your email address before verifying your publisher account');
     }
-    if (user.publisherVerification?.status === PublisherVerificationStatus.VERIFIED) {
-      throw new ConflictException('Your publisher identity is already verified');
-    }
+    // EasyOnboard bills completed steps even when a person abandons the flow.
+    // Serialising starts per user ensures a double-click, retrying browser, or
+    // second device cannot replace a live Dojah reference with a billable new
+    // session. PostgreSQL advisory locks are transaction-scoped and leave no
+    // persistent lock behind if the request fails.
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`publisher-verification:${userId}`}))`;
+      const existing = await tx.publisherVerification.findUnique({
+        where: { userId },
+        select: this.statusSelect,
+      });
+      if (existing?.status === PublisherVerificationStatus.VERIFIED) {
+        throw new ConflictException('Your publisher identity is already verified');
+      }
+      if (existing?.status === PublisherVerificationStatus.PENDING && existing.providerReference) {
+        if (existing.method !== input.method) {
+          throw new ConflictException(`Resume the pending ${existing.method} verification before choosing ${input.method}.`);
+        }
+        return { verification: existing, resumed: true };
+      }
 
-    const now = new Date();
-    const providerReference = `sr-publisher-${randomUUID().replace(/-/g, '')}`;
-    const verification = await this.prisma.publisherVerification.upsert({
-      where: { userId },
-      create: {
-        userId,
-        method: input.method,
-        status: PublisherVerificationStatus.PENDING,
-        providerReference,
-        providerStatus: 'Ongoing',
-        requestedAt: now,
-      },
-      update: {
-        method: input.method,
-        status: PublisherVerificationStatus.PENDING,
-        providerReference,
-        providerVerificationType: null,
-        providerStatus: 'Ongoing',
-        livenessVerified: false,
-        failureReason: null,
-        requestedAt: now,
-        completedAt: null,
-        verifiedAt: null,
-      },
-      select: this.statusSelect,
+      const now = new Date();
+      const providerReference = `sr-publisher-${randomUUID().replace(/-/g, '')}`;
+      const verification = await tx.publisherVerification.upsert({
+        where: { userId },
+        create: {
+          userId,
+          method: input.method,
+          status: PublisherVerificationStatus.PENDING,
+          providerReference,
+          providerStatus: 'Ongoing',
+          requestedAt: now,
+        },
+        update: {
+          method: input.method,
+          status: PublisherVerificationStatus.PENDING,
+          providerReference,
+          providerVerificationType: null,
+          providerStatus: 'Ongoing',
+          livenessVerified: false,
+          nameMatchStatus: IdentityNameMatchStatus.NOT_CHECKED,
+          nameMatchReason: null,
+          failureReason: null,
+          requestedAt: now,
+          completedAt: null,
+          verifiedAt: null,
+        },
+        select: this.statusSelect,
+      });
+      await tx.publisherVerificationAttempt.create({
+        data: {
+          verificationId: verification.id,
+          userId,
+          method: input.method,
+          status: PublisherVerificationStatus.PENDING,
+          providerReference,
+          providerStatus: 'Ongoing',
+          requestedAt: now,
+        },
+      });
+      return { verification, resumed: false };
     });
+    const verification = outcome.verification;
     await this.audit.record({
       actorUserId: userId,
-      action: 'publisher_verification.started',
+      action: outcome.resumed ? 'publisher_verification.resume_requested' : 'publisher_verification.started',
       entityType: 'publisher_verification',
       entityId: verification.id,
-      metadata: { method: input.method, provider: 'DOJAH' },
+      metadata: { method: verification.method, provider: 'DOJAH', reusedProviderReference: outcome.resumed },
     });
     return this.serialize(verification);
   }
@@ -112,9 +146,18 @@ export class PublisherVerificationService {
     });
     // A stale or unrelated Dojah delivery is acknowledged without leaking any
     // account information. It can never alter a publisher's access.
-    if (!verification) return { received: true, matched: false };
-    const providerResult = this.dojah.parseHostedVerification(event, verification.providerReference ?? undefined);
-    await this.applyProviderResult(verification, providerResult, 'webhook');
+    if (verification) {
+      const providerResult = this.dojah.parseHostedVerification(event, verification.providerReference ?? undefined);
+      await this.applyProviderResult(verification, providerResult, 'webhook');
+      return { received: true, matched: true };
+    }
+    const historicalAttempt = await this.prisma.publisherVerificationAttempt.findUnique({
+      where: { providerReference: event.reference_id },
+      include: { verification: { select: this.statusSelect } },
+    });
+    if (!historicalAttempt) return { received: true, matched: false };
+    const providerResult = this.dojah.parseHostedVerification(event, historicalAttempt.providerReference);
+    await this.applyProviderResult(historicalAttempt.verification, providerResult, 'webhook');
     return { received: true, matched: true };
   }
 
@@ -134,10 +177,22 @@ export class PublisherVerificationService {
     source: 'webhook' | 'reconciled',
   ) {
     const methodMatches = provider.method !== null && provider.method === verification.method;
-    const verified = provider.passed && methodMatches;
+    const providerPassed = provider.passed && methodMatches;
+    const account = await this.prisma.user.findUnique({
+      where: { id: verification.userId },
+      select: { firstName: true, lastName: true },
+    });
+    if (!account) throw new NotFoundException('Publisher account not found');
+    const nameMatch = providerPassed
+      ? compareIdentityName(account, provider.identityName)
+      : { status: IdentityNameMatchStatus.NOT_CHECKED, reason: null };
+    const verified = providerPassed && nameMatch.status === IdentityNameMatchStatus.MATCHED;
+    const underReview = providerPassed && !verified;
     const completed = provider.completed || provider.terminal;
     const nextStatus = verified
       ? PublisherVerificationStatus.VERIFIED
+      : underReview
+        ? PublisherVerificationStatus.UNDER_REVIEW
       : completed
         ? (provider.providerStatus.toLowerCase() === 'failed' || provider.providerStatus.toLowerCase() === 'abandoned'
           ? PublisherVerificationStatus.FAILED
@@ -146,8 +201,35 @@ export class PublisherVerificationService {
     const mismatchReason = provider.method && !methodMatches
       ? `Complete the ${verification.method ?? 'selected'} method you chose before opening Dojah.`
       : null;
-    const failureReason = verified ? null : mismatchReason ?? provider.reason;
+    const failureReason = verified ? null : mismatchReason ?? nameMatch.reason ?? provider.reason;
     const now = new Date();
+    await this.prisma.publisherVerificationAttempt.updateMany({
+      where: { verificationId: verification.id, providerReference: provider.referenceId },
+      data: {
+        status: nextStatus,
+        providerVerificationType: provider.method,
+        providerStatus: provider.providerStatus,
+        livenessVerified: provider.livenessVerified,
+        nameMatchStatus: nameMatch.status,
+        nameMatchReason: nameMatch.reason,
+        failureReason,
+        completedAt: completed ? now : null,
+        verifiedAt: verified ? now : null,
+      },
+    });
+    // A terminal retry may legitimately have started a newer reference. The
+    // older provider callback is retained on its attempt, but cannot regain or
+    // revoke access by changing the current verification aggregate.
+    if (verification.providerReference !== provider.referenceId) {
+      await this.audit.record({
+        actorUserId: verification.userId,
+        action: 'publisher_verification.stale_attempt_reconciled',
+        entityType: 'publisher_verification',
+        entityId: verification.id,
+        metadata: { source, providerReference: provider.referenceId, status: nextStatus },
+      });
+      return this.serialize(verification);
+    }
     const updated = await this.prisma.publisherVerification.update({
       where: { id: verification.id },
       data: {
@@ -155,6 +237,8 @@ export class PublisherVerificationService {
         providerVerificationType: provider.method,
         providerStatus: provider.providerStatus,
         livenessVerified: provider.livenessVerified,
+        nameMatchStatus: nameMatch.status,
+        nameMatchReason: nameMatch.reason,
         failureReason,
         completedAt: completed ? now : null,
         verifiedAt: verified ? now : null,
@@ -173,6 +257,7 @@ export class PublisherVerificationService {
           providerMethod: provider.method,
           providerStatus: provider.providerStatus,
           livenessVerified: provider.livenessVerified,
+          nameMatchStatus: nameMatch.status,
         },
       });
     }
@@ -209,6 +294,8 @@ export class PublisherVerificationService {
       providerMethod: verification.providerVerificationType,
       providerStatus: verification.providerStatus,
       livenessVerified: verification.livenessVerified,
+      nameMatchStatus: verification.nameMatchStatus,
+      nameMatchReason: verification.nameMatchReason,
       failureReason: verification.failureReason,
       requestedAt: verification.requestedAt,
       completedAt: verification.completedAt,
@@ -227,6 +314,8 @@ export class PublisherVerificationService {
       providerMethod: null,
       providerStatus: null,
       livenessVerified: false,
+      nameMatchStatus: IdentityNameMatchStatus.NOT_CHECKED,
+      nameMatchReason: null,
       failureReason: null,
       requestedAt: null,
       completedAt: null,
@@ -243,6 +332,8 @@ export class PublisherVerificationService {
     providerVerificationType: true,
     providerStatus: true,
     livenessVerified: true,
+    nameMatchStatus: true,
+    nameMatchReason: true,
     failureReason: true,
     requestedAt: true,
     completedAt: true,

@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 
 export const PLATFORM_FEE_BPS = 500;
 export const AGENT_FEE_BPS = 500;
+export const LEGAL_FEE_BPS = 1000;
 export const BASIS_POINTS_DIVISOR = 10_000n;
 
 export function percentageOfKobo(amountKobo: bigint, basisPoints: number): bigint {

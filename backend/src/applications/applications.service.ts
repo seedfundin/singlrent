@@ -4,11 +4,11 @@ import { AuditService } from '../common/database/audit.service';
 import { pageResult, Paginated } from '../common/http/pagination';
 import { PrismaService } from '../common/database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { ApplicationQuery, CreateApplicationRequest, RejectApplicationRequest } from './dto/application.schemas';
+import { ApplicationQuery, CreateApplicationRequest, RejectApplicationRequest, UpdateApplicationRequest } from './dto/application.schemas';
 
 const applicationInclude = {
   listing: { select: { id: true, slug: true, title: true, annualRentKobo: true, cautionFeeKobo: true } },
-  tenant: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+  tenant: { select: { id: true, firstName: true, lastName: true } },
   landlord: { select: { id: true, firstName: true, lastName: true } },
   agent: { select: { id: true, firstName: true, lastName: true } },
   payments: { select: { id: true, reference: true, status: true, totalAmountKobo: true, createdAt: true }, orderBy: { createdAt: 'desc' as const } },
@@ -26,6 +26,7 @@ export class ApplicationsService {
   ) {}
 
   async create(tenantId: string, input: CreateApplicationRequest): Promise<ApplicationView> {
+    if (input.messageToLandlord?.trim()) throw new ForbiddenException('Use the Property Assistant for property questions.');
     const listing = await this.prisma.listing.findFirst({
       where: { id: input.listingId, status: ListingStatus.PUBLISHED, availability: ListingAvailability.AVAILABLE },
     });
@@ -56,6 +57,8 @@ export class ApplicationsService {
         occupation: input.occupation,
         occupantsCount: input.occupantsCount,
         messageToLandlord: input.messageToLandlord,
+        tenantQuestionnaire: input.tenantQuestionnaire,
+        questionnaireSubmittedAt: new Date(),
       },
       include: applicationInclude,
     });
@@ -81,6 +84,31 @@ export class ApplicationsService {
 
   async received(managerId: string, query: ApplicationQuery): Promise<Paginated<ApplicationView>> {
     return this.list({ OR: [{ landlordId: managerId }, { agentId: managerId }] }, query);
+  }
+
+  /** Tenants can correct their own pre-decision application. Managers retain the
+   * immutable submitted snapshot once a payment decision has been made. */
+  async updatePending(tenantId: string, applicationId: string, input: UpdateApplicationRequest): Promise<ApplicationView> {
+    if (input.messageToLandlord?.trim()) throw new ForbiddenException('Use the Property Assistant for property questions.');
+    const application = await this.prisma.rentalApplication.findFirst({ where: { id: applicationId, tenantId }, select: { id: true, status: true } });
+    if (!application) throw new NotFoundException('Application not found');
+    if (application.status !== ApplicationStatus.PENDING) {
+      throw new ConflictException('Only an application awaiting a manager decision can be updated');
+    }
+    const updated = await this.prisma.rentalApplication.update({
+      where: { id: application.id },
+      data: {
+        moveInDate: new Date(input.moveInDate),
+        leaseMonths: input.leaseMonths,
+        occupation: input.occupation,
+        occupantsCount: input.occupantsCount,
+        tenantQuestionnaire: input.tenantQuestionnaire,
+        questionnaireSubmittedAt: new Date(),
+      },
+      include: applicationInclude,
+    });
+    await this.audit.record({ actorUserId: tenantId, action: 'application.updated_before_decision', entityType: 'rental_application', entityId: updated.id });
+    return updated;
   }
 
   async approveForPayment(managerId: string, applicationId: string): Promise<ApplicationView> {

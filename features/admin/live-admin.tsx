@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Shell, Status } from "@/features/app/shell";
 import { useAppSession } from "@/features/app/app-provider";
 import { listingImages } from "@/features/listings/listing-card";
+import { MoveInOperations } from "./move-in-operations";
 import type { View } from "@/lib/routes";
 import {
   api,
@@ -44,7 +45,7 @@ type PermissionChoice = PermissionEffect | "INHERIT";
 const permissionGroups: Array<[string, Array<[AdminPermissionKey, string]>]> = [
   ["Users", [["USERS_VIEW", "View users"], ["USERS_EDIT", "Edit users"], ["USERS_SUSPEND", "Suspend users"], ["KYC_VIEW", "View KYC"], ["KYC_REVIEW", "Approve/reject KYC"]]],
   ["Properties", [["LISTINGS_VIEW", "View listings"], ["LISTINGS_SUSPEND", "Suspend listings"]]],
-  ["Payments", [["TRANSACTIONS_VIEW", "View transactions"], ["ESCROW_MANAGE", "Manage escrow"], ["PAYOUTS_RELEASE", "Release payouts"], ["REFUNDS_PROCESS", "Process refunds"], ["PLATFORM_FEES_VIEW", "View platform fees"], ["AGENT_COMMISSIONS_VIEW", "View agent commissions"]]],
+  ["Payments", [["TRANSACTIONS_VIEW", "View transactions"], ["ESCROW_MANAGE", "Manage protected payments"], ["PAYOUTS_RELEASE", "Release payouts"], ["REFUNDS_PROCESS", "Process refunds"], ["PLATFORM_FEES_VIEW", "View platform fees"], ["AGENT_COMMISSIONS_VIEW", "View agent commissions"]]],
   ["Reports & maintenance", [["REPORTS_VIEW", "View reports"], ["REPORTS_INVESTIGATE", "Investigate reports"], ["REPORTS_RESOLVE", "Resolve reports"], ["MAINTENANCE_MANAGE", "Manage maintenance cases"]]],
   ["Reviews", [["REVIEWS_VIEW", "View reviews"], ["REVIEWS_MODERATE", "Moderate/remove reviews"]]],
   ["Administration", [["ADMINS_CREATE", "Create admins"], ["ADMIN_PERMISSIONS_EDIT", "Edit admin permissions"], ["AUDIT_LOGS_VIEW", "View audit logs"], ["SYSTEM_SETTINGS_MODIFY", "Modify system settings"]]],
@@ -126,6 +127,14 @@ function LiveAdminDashboardContent({ go }: { go: Go }) {
   const [summary, setSummary] = useState<{ users: number; administrators: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pushActivity, setPushActivity] = useState<Awaited<ReturnType<typeof api.admin.notificationActivity>> | null>(null);
+
+  useEffect(() => {
+    if (!token || !session?.user.roles.includes('SUPER_ADMIN')) return;
+    let active = true;
+    api.admin.notificationActivity(token).then((result) => { if (active) setPushActivity(result); }).catch(() => { if (active) setPushActivity(null); });
+    return () => { active = false; };
+  }, [token, session?.user.roles]);
 
   useEffect(() => {
     if (!token) return;
@@ -156,6 +165,7 @@ function LiveAdminDashboardContent({ go }: { go: Go }) {
       <div className="metric gold"><span>Platform users</span><strong>{loading ? "…" : summary?.users ?? "—"}</strong><small>Visible to your permission set</small></div>
       <div className="metric green"><span>Administrators</span><strong>{loading ? "…" : summary?.administrators ?? "—"}</strong><small>Admin and Super Admin accounts</small></div>
     </div>
+    {pushActivity && <section className="panel live-queue-preview"><div className="subhead"><span><small>Browser notifications</small><h2>Push activity</h2></span></div>{pushActivity.enabled ? <p>{pushActivity.activeDevices} active devices · {pushActivity.attempts} submission attempts · {pushActivity.accepted} accepted · {pushActivity.failed} failed · {pushActivity.invalid} invalid subscriptions removed. Provider acceptance does not prove device delivery.</p> : <p>Browser push notifications are disabled.</p>}</section>}
     <section className="panel live-queue-preview"><div className="subhead"><span><small>Live properties</small><h2>Recently published</h2></span><Button variant="ghost" onClick={() => go("admin-listings")}>Manage listings <ArrowRight size={13} /></Button></div>
       {loading ? <div className="admin-live-loading"><LoaderCircle size={17} /> Loading live listings…</div> : liveListings.length ? liveListings.map((listing) => <article key={listing.id}><span>{listing.media[0] ? <img src={listing.media[0].url} alt="" /> : <i><Building2 size={15} /></i>}<b>{listing.title}<small>{listing.area}, {listing.state} · {listingRent(listing)} / year</small></b></span><Status tone="green">Published</Status></article>) : <div className="admin-live-empty"><Check size={17} /> No published listings yet.</div>}
     </section>
@@ -168,12 +178,168 @@ export function AdminListingReview({ go }: { go: Go }) {
 
 const transactionStatuses = ["ALL", "INITIALIZED", "PENDING", "SUCCESS", "FAILED", "REVERSED", "REFUNDED"] as const;
 
+type ReleaseCheck = {
+  label: string;
+  detail: string;
+  ready: boolean;
+};
+
+function hasBlockingMoveInIssue(transaction: ApiAdminTransaction) {
+  return transaction.moveInVerification?.issues.some((issue) =>
+    issue.status !== "RESOLVED" && (issue.severity !== "MINOR" || issue.classificationDisputed),
+  ) ?? false;
+}
+
+function paymentReleaseReadiness(transaction: ApiAdminTransaction) {
+  const paymentHeld = transaction.escrow?.status === "HELD";
+  const verification = transaction.moveInVerification;
+  const tenancy = transaction.application.tenancy;
+
+  // Payments created before the move-in workflow retain their existing release path.
+  if (!verification) {
+    const ready = paymentHeld && transaction.status === "SUCCESS" && transaction.application.status === "PAYMENT_HELD";
+    return {
+      ready,
+      checks: [
+        { label: "Successful payment", detail: transaction.status === "SUCCESS" ? "Payment confirmed" : "Payment has not been confirmed", ready: transaction.status === "SUCCESS" },
+        { label: "Payment protection", detail: paymentHeld ? "Funds are held for review" : "Funds are no longer available for release", ready: paymentHeld },
+        { label: "Legacy payment flow", detail: "This payment was created before the move-in document workflow.", ready: transaction.application.status === "PAYMENT_HELD" },
+      ] satisfies ReleaseCheck[],
+    };
+  }
+
+  const verificationApproved = verification.status === "VERIFIED";
+  const agreementSigned = tenancy?.agreement?.status === "EXECUTED";
+  const guarantorSigned = tenancy?.guarantorForm?.status === "EXECUTED";
+  const tenancyActive = tenancy?.status === "ACTIVE";
+  const pendingRefund = verification.refundRequests.some((request) => request.status === "PENDING");
+  const blockingIssue = hasBlockingMoveInIssue(transaction);
+  const clearToRelease = !verification.adminHold && !pendingRefund && !blockingIssue;
+  const checks: ReleaseCheck[] = [
+    {
+      label: "Property checklist approved",
+      detail: verificationApproved ? `Approved ${verification.verifiedAt ? displayDate(verification.verifiedAt) : ""}`.trim() : "Awaiting an approved property checklist",
+      ready: verificationApproved,
+    },
+    {
+      label: "Tenancy agreement signed",
+      detail: agreementSigned ? `Signed ${tenancy?.agreement?.executedAt ? displayDate(tenancy.agreement.executedAt) : ""}`.trim() : "Awaiting the tenant's signature",
+      ready: Boolean(agreementSigned),
+    },
+    {
+      label: "Guarantor form signed",
+      detail: guarantorSigned ? `Signed ${tenancy?.guarantorForm?.signedAt ? displayDate(tenancy.guarantorForm.signedAt) : ""}`.trim() : "Awaiting the guarantor's signature or signed upload",
+      ready: Boolean(guarantorSigned),
+    },
+    {
+      label: "Tenancy activated",
+      detail: tenancyActive ? "The tenancy is active" : "The tenancy activates when both documents are complete",
+      ready: Boolean(tenancyActive),
+    },
+    {
+      label: "No open issue or refund",
+      detail: verification.adminHold ? "An administrator hold is active" : pendingRefund ? "A refund request is awaiting a decision" : blockingIssue ? "A reported property issue still needs attention" : "No release blockers found",
+      ready: clearToRelease,
+    },
+    {
+      label: "Payment remains protected",
+      detail: paymentHeld ? "Funds are ready to be authorized" : "Funds have already been released, refunded, or changed",
+      ready: paymentHeld,
+    },
+  ];
+
+  return { ready: checks.every((check) => check.ready), checks };
+}
+
 export function LiveAdminTransactions({ go }: { go: Go }) {
   return <AdminAccess go={go} title="Transactions"><LiveAdminTransactionsContent go={go} /></AdminAccess>;
 }
 
 export function LiveAdminEscrow({ go }: { go: Go }) {
-  return <AdminAccess go={go} title="Escrow operations"><LiveAdminTransactionsContent go={go} escrowOnly /></AdminAccess>;
+  return <AdminAccess go={go} title="Payment releases"><LiveAdminTransactionsContent go={go} escrowOnly /></AdminAccess>;
+}
+
+type IdentityReviewKind = 'KYC' | 'PUBLISHER';
+type IdentityReviewItem = {
+  key: string;
+  user: ApiAdminUser;
+  kind: IdentityReviewKind;
+  method: string | null;
+  nameMatchStatus: string;
+  reason: string | null;
+};
+
+function reviewLabel(kind: IdentityReviewKind) {
+  return kind === 'KYC' ? 'Tenant / payout identity' : 'Landlord / agent publisher identity';
+}
+
+export function LiveAdminIdentityReviews({ go }: { go: Go }) {
+  return <AdminAccess go={go} title="Identity reviews"><LiveAdminIdentityReviewsContent go={go} /></AdminAccess>;
+}
+
+function LiveAdminIdentityReviewsContent({ go }: { go: Go }) {
+  const { session } = useAppSession();
+  const token = session?.accessToken;
+  const [items, setItems] = useState<IdentityReviewItem[]>([]);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [reviewNote, setReviewNote] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState<'approve' | 'reject' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = () => {
+    if (!token) return;
+    setLoading(true);
+    setError(null);
+    api.admin.kyc(token, { pageSize: 100 }).then((response) => {
+      const next = response.items.flatMap((user) => {
+        const entries: IdentityReviewItem[] = [];
+        if (user.kyc?.status === 'UNDER_REVIEW') {
+          entries.push({ key: `${user.id}:kyc`, user, kind: 'KYC', method: user.kyc.identityMethod, nameMatchStatus: user.kyc.nameMatchStatus, reason: user.kyc.nameMatchReason });
+        }
+        if (user.publisherVerification?.status === 'UNDER_REVIEW') {
+          entries.push({ key: `${user.id}:publisher`, user, kind: 'PUBLISHER', method: user.publisherVerification.method, nameMatchStatus: user.publisherVerification.nameMatchStatus, reason: user.publisherVerification.nameMatchReason });
+        }
+        return entries;
+      });
+      setItems(next);
+      setSelectedKey((current) => current && next.some((item) => item.key === current) ? current : next[0]?.key ?? null);
+    }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'Unable to load identity reviews.'))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, [token]);
+  const selected = items.find((item) => item.key === selectedKey) ?? null;
+
+  const review = async (approved: boolean) => {
+    if (!token || !selected) return;
+    if (reviewNote.trim().length < 3) {
+      setError('Add a short review note for the audit trail.');
+      return;
+    }
+    setSaving(approved ? 'approve' : 'reject');
+    setError(null);
+    try {
+      const input = { approved, reviewNote: reviewNote.trim() };
+      if (selected.kind === 'KYC') await api.admin.reviewKyc(token, selected.user.id, input);
+      else await api.admin.reviewPublisherVerification(token, selected.user.id, input);
+      setReviewNote('');
+      load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to complete this identity review.');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  if (!session) return null;
+  return <Shell go={go} role="admin" title="Identity reviews"><div className="page live-admin-page">
+    <div className="page-title"><span><small>Identity safeguards</small><h1>Identity name reviews</h1><p>Dojah confirmed these identity records, but the legal name was missing or differs from the SingleRent account. Review supporting evidence before granting access.</p></span></div>
+    <ErrorMessage message={error} />
+    <div className="admin-review-layout"><section className="panel admin-listing-list">
+      {loading ? <div className="admin-live-loading"><LoaderCircle size={17} /> Loading identity reviews…</div> : items.length ? items.map((item) => <button type="button" className={selected?.key === item.key ? 'active' : ''} onClick={() => { setSelectedKey(item.key); setReviewNote(''); }} key={item.key}><span className="admin-listing-thumbnail"><UserRound size={17} /></span><span><b>{item.user.firstName} {item.user.lastName}</b><small>{reviewLabel(item.kind)}</small><small>{item.method ?? 'Identity'} · provider name {item.nameMatchStatus.toLowerCase().replace('_', ' ')}</small></span><Status tone="gold">Review needed</Status></button>) : <div className="admin-live-empty"><Check size={17} /> No identity name reviews are waiting.</div>}
+    </section><aside className="panel admin-listing-review">{selected ? <><div className="admin-review-heading"><span><small>{reviewLabel(selected.kind)}</small><h2>{selected.user.firstName} {selected.user.lastName}</h2><p>{selected.user.email}</p></span><button type="button" aria-label="Close review" onClick={() => setSelectedKey(null)}><X size={16} /></button></div><div className="admin-review-facts"><span><small>Method</small><b>{selected.method ?? 'Not supplied'}</b></span><span><small>Name check</small><b>{selected.nameMatchStatus.toLowerCase().replace('_', ' ')}</b></span><span><small>Provider details</small><b>Not retained</b></span></div><p className="admin-readonly-note">{selected.reason ?? 'The provider did not return a name that can be used for automatic approval.'}</p><label className="admin-note">Review note<textarea value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} placeholder="State the supporting evidence and decision." maxLength={1000} /></label><div className="actions"><Button variant="outline" disabled={Boolean(saving)} onClick={() => void review(false)}>{saving === 'reject' ? <><LoaderCircle className="spin" size={14} /> Declining…</> : 'Decline verification'}</Button><Button disabled={Boolean(saving)} onClick={() => void review(true)}>{saving === 'approve' ? <><LoaderCircle className="spin" size={14} /> Approving…</> : 'Approve after review'}</Button></div></> : <div className="admin-live-empty"><ShieldCheck size={19} /> Select an identity review to take action.</div>}</aside></div>
+  </div></Shell>;
 }
 
 function LiveAdminTransactionsContent({ go, escrowOnly = false }: { go: Go; escrowOnly?: boolean }) {
@@ -211,6 +377,7 @@ function LiveAdminTransactionsContent({ go, escrowOnly = false }: { go: Go; escr
 
   useEffect(() => { load(); }, [token, status, search]);
   const selected = transactions.find((transaction) => transaction.id === selectedId) ?? null;
+  const selectedReleaseReadiness = selected ? paymentReleaseReadiness(selected) : null;
   const visibleTransactions = escrowOnly
     ? transactions.filter((transaction) => transaction.escrow && !["RELEASED", "REFUNDED"].includes(transaction.escrow.status))
     : transactions;
@@ -247,7 +414,7 @@ function LiveAdminTransactionsContent({ go, escrowOnly = false }: { go: Go; escr
       await api.admin.authorizeEscrowRelease(token, selected.id);
       load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to authorize the escrow release.");
+      setError(cause instanceof Error ? cause.message : "Unable to authorize the payment release.");
     } finally {
       setReleasing(false);
     }
@@ -273,21 +440,25 @@ function LiveAdminTransactionsContent({ go, escrowOnly = false }: { go: Go; escr
   };
 
   if (!session) return null;
-  return <Shell go={go} role="admin" title={escrowOnly ? "Escrow operations" : "Transactions"}><div className="page live-admin-page">
-    <div className="page-title"><span><small>Live financial operations</small><h1>{escrowOnly ? "Escrow operations" : "Transactions"}</h1><p>{escrowOnly ? "Review live held funds, authorize eligible rent release, and resolve caution disputes with an audit trail." : "Search the shared SingleRent Transaction Reference to trace payment, escrow, payout and ledger activity."}</p></span></div>
+  return <Shell go={go} role="admin" title={escrowOnly ? "Payment releases" : "Transactions"}><div className="page live-admin-page">
+    <div className="page-title"><span><small>Live financial operations</small><h1>{escrowOnly ? "Payment releases" : "Transactions"}</h1><p>{escrowOnly ? "Review each completed move-in, confirm the document checklist, and authorize eligible landlord or agent payouts with a full audit trail." : "Search the shared SingleRent Transaction Reference to trace payment, payment protection, payout and ledger activity."}</p></span></div>
+    {escrowOnly && <MoveInOperations token={session.accessToken} />}
     <form className="admin-transaction-filters" onSubmit={(event) => { event.preventDefault(); setSearch(searchInput.trim()); }}>
-      <label><Search size={14} /><input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Search SR or Paystack reference, person or property" /></label>
+      <label><Search size={14} /><input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Search transaction reference, person or property" /></label>
       <Button type="submit" variant="outline">Search</Button>
       {search && <Button type="button" variant="ghost" onClick={() => { setSearchInput(""); setSearch(""); }}>Clear</Button>}
     </form>
     <div className="admin-status-tabs">{transactionStatuses.map((item) => <button type="button" key={item} className={status === item ? "active" : ""} onClick={() => setStatus(item)}>{item === "ALL" ? "All" : transactionLabel(item)}</button>)}</div>
     <ErrorMessage message={error} />
     <div className="admin-transaction-layout"><section className="panel admin-transaction-list">
-      {loading ? <div className="admin-live-loading"><LoaderCircle size={17} /> Loading live transactions…</div> : visibleTransactions.length ? visibleTransactions.map((transaction) => <button type="button" key={transaction.id} className={transaction.id === selected?.id ? "active" : ""} onClick={() => setSelectedId(transaction.id)}>
+      {loading ? <div className="admin-live-loading"><LoaderCircle size={17} /> Loading live transactions…</div> : visibleTransactions.length ? visibleTransactions.map((transaction) => {
+        const releaseReadiness = paymentReleaseReadiness(transaction);
+        return <button type="button" key={transaction.id} className={transaction.id === selected?.id ? "active" : ""} onClick={() => setSelectedId(transaction.id)}>
         <ReceiptText size={18} />
         <span><b>{transaction.listing.title}</b><small className="admin-transaction-reference">{transaction.transactionReference}</small><small>{transaction.tenant.firstName} {transaction.tenant.lastName} · {displayDate(transaction.createdAt)}</small></span>
-        <span><b>{formatNaira(Number(transaction.totalAmountKobo) / 100)}</b><Status tone={transactionStatusTone(transaction.status)}>{transactionLabel(transaction.status)}</Status></span>
-      </button>) : <div className="admin-live-empty"><WalletCards size={18} /> {escrowOnly ? "No escrow records need action." : "No matching transactions."}</div>}
+        <span><b>{formatNaira(Number(transaction.totalAmountKobo) / 100)}</b>{transaction.escrow?.status === "HELD" && transaction.status === "SUCCESS" ? <Status tone={releaseReadiness.ready ? "green" : "gold"}>{releaseReadiness.ready ? "Ready to release" : "Review needed"}</Status> : <Status tone={transactionStatusTone(transaction.status)}>{transactionLabel(transaction.status)}</Status>}</span>
+      </button>;
+      }) : <div className="admin-live-empty"><WalletCards size={18} /> {escrowOnly ? "No payment releases need action." : "No matching transactions."}</div>}
     </section>
     <aside className="panel admin-transaction-detail">{selected ? <>
       <div className="admin-review-heading"><span><small>SingleRent Transaction Reference</small><h2><code>{selected.transactionReference}</code></h2><p>{selected.listing.title}</p></span><button type="button" aria-label="Close transaction details" onClick={() => setSelectedId(null)}><X size={16} /></button></div>
@@ -296,13 +467,13 @@ function LiveAdminTransactionsContent({ go, escrowOnly = false }: { go: Go; escr
         <div><dt>Landlord</dt><dd>{selected.landlord.firstName} {selected.landlord.lastName}</dd></div>
         <div><dt>Agent</dt><dd>{selected.agent ? `${selected.agent.firstName} ${selected.agent.lastName}` : "Not applicable"}</dd></div>
         <div><dt>Total</dt><dd>{formatNaira(Number(selected.totalAmountKobo) / 100)}</dd></div>
-        <div><dt>Escrow</dt><dd>{selected.escrow ? transactionLabel(selected.escrow.status) : "Not created"}</dd></div>
-        <div><dt>Paystack collection</dt><dd><code>{selected.providerReference ?? "Not available"}</code></dd></div>
+        <div><dt>Payment protection</dt><dd>{selected.escrow ? transactionLabel(selected.escrow.status) : "Not created"}</dd></div>
+        <div><dt>Payment reference</dt><dd><code>{selected.providerReference ?? "Not available"}</code></dd></div>
       </dl>
-      {selected.escrow?.status === "HELD" && selected.status === "SUCCESS" && selected.application.status === "PAYMENT_HELD" && <section className="admin-refund-form"><h3>Authorize rent release</h3><p>This creates landlord/agent payout records. Recipients still need to withdraw to their verified Paystack bank account.</p><Button disabled={releasing} onClick={() => void release()}>{releasing ? <><LoaderCircle className="spin" size={14} /> Authorizing…</> : "Authorize escrow release"}</Button></section>}
-      {selected.escrow && (selected.escrow.status === "HELD" || selected.escrow.status === "PARTIALLY_SETTLED") && <section className="admin-refund-form"><h3>Schedule tenant refund</h3><p>The tenant must have saved a refund bank account. Paystack sends this as a traceable transfer linked to the reference above.</p><div><label>Escrow source<select value={refundScope} onChange={(event) => setRefundScope(event.target.value as "RENT" | "CAUTION")}><option value="RENT">Rent escrow</option><option value="CAUTION">Caution escrow</option></select></label><label>Amount (₦)<input inputMode="decimal" value={refundAmount} onChange={(event) => setRefundAmount(event.target.value)} placeholder="0.00" /></label></div><label>Reason<textarea value={refundReason} onChange={(event) => setRefundReason(event.target.value)} placeholder="Why is this refund being issued?" maxLength={1000} /></label><Button disabled={refunding} onClick={() => void issueRefund()}>{refunding ? <><LoaderCircle className="spin" size={14} /> Scheduling…</> : "Schedule Paystack refund"}</Button></section>}
+      {selected.escrow?.status === "HELD" && selected.status === "SUCCESS" && (selected.application.status === "PAYMENT_HELD" || selected.application.status === "ACTIVE") && selectedReleaseReadiness && <section className="admin-release-readiness"><div className="admin-release-heading"><span><small>Before you release</small><h3>Payment release checklist</h3></span><Status tone={selectedReleaseReadiness.ready ? "green" : "gold"}>{selectedReleaseReadiness.ready ? "Ready to release" : "Action needed"}</Status></div><p>Every item is checked against the live record. Payment release remains unavailable until every requirement is complete.</p><ul>{selectedReleaseReadiness.checks.map((check) => <li key={check.label} className={check.ready ? "ready" : "blocked"}>{check.ready ? <Check size={15} aria-hidden="true" /> : <CircleAlert size={15} aria-hidden="true" />}<span><b>{check.label}</b><small>{check.detail}</small></span></li>)}</ul><Button disabled={releasing || !selectedReleaseReadiness.ready} onClick={() => void release()}>{releasing ? <><LoaderCircle className="spin" size={14} /> Authorizing…</> : "Authorize payment release"}</Button>{!selectedReleaseReadiness.ready && <small className="admin-release-note">Resolve the item marked in amber before authorizing the payout.</small>}</section>}
+      {selected.escrow && (selected.escrow.status === "HELD" || selected.escrow.status === "PARTIALLY_SETTLED") && <section className="admin-refund-form"><h3>Schedule tenant refund</h3><p>The tenant must have saved a refund bank account. The refund is sent as a traceable transfer linked to the reference above.</p><div><label>Refund source<select value={refundScope} onChange={(event) => setRefundScope(event.target.value as "RENT" | "CAUTION")}><option value="RENT">Rent payment</option><option value="CAUTION">Caution deposit</option></select></label><label>Amount (₦)<input inputMode="decimal" value={refundAmount} onChange={(event) => setRefundAmount(event.target.value)} placeholder="0.00" /></label></div><label>Reason<textarea value={refundReason} onChange={(event) => setRefundReason(event.target.value)} placeholder="Why is this refund being issued?" maxLength={1000} /></label><Button disabled={refunding} onClick={() => void issueRefund()}>{refunding ? <><LoaderCircle className="spin" size={14} /> Scheduling…</> : "Schedule refund"}</Button></section>}
       {selected.escrow?.cautionDeductions.length ? <section className="admin-transaction-audit admin-caution-settlements"><h3>Caution settlement</h3>{selected.escrow.cautionDeductions.map((deduction) => <article key={deduction.id}><span><b>{formatNaira(Number(deduction.amountKobo) / 100)} deduction</b><small>{deduction.reason}</small><small>{deduction.disputedAt && !deduction.resolvedAt ? "Tenant disputed — admin decision required" : deduction.resolution ? transactionLabel(deduction.resolution) : deduction.acceptedAt ? "Accepted by tenant" : "Awaiting tenant response"}</small></span>{deduction.disputedAt && !deduction.resolvedAt ? <div><label>Resolution note<textarea value={resolutionNote} onChange={(event) => setResolutionNote(event.target.value)} maxLength={1000} placeholder="Explain the decision for both parties" /></label><span><Button variant="outline" disabled={resolvingDeductionId === deduction.id} onClick={() => void resolveDispute(deduction.id, "RETURN_TO_TENANT")}>Return to tenant</Button><Button disabled={resolvingDeductionId === deduction.id} onClick={() => void resolveDispute(deduction.id, "PAY_LANDLORD")}>{resolvingDeductionId === deduction.id ? <LoaderCircle className="spin" size={14} /> : "Pay landlord"}</Button></span></div> : null}</article>)}</section> : null}
-      <section className="admin-transaction-audit"><h3>Payout audit</h3>{selected.payouts.length ? <ul>{selected.payouts.map((payout) => <li key={payout.id}><span><b>{transactionLabel(payout.kind)} · {payout.recipient.firstName} {payout.recipient.lastName}</b><small>{formatNaira(Number(payout.amountKobo) / 100)} · {transactionLabel(payout.status)}</small></span><code>{payout.providerReference ?? "Paystack transfer not created"}</code></li>)}</ul> : <p>No payouts have been allocated yet.</p>}</section>
+      <section className="admin-transaction-audit"><h3>Payout audit</h3>{selected.payouts.length ? <ul>{selected.payouts.map((payout) => <li key={payout.id}><span><b>{transactionLabel(payout.kind)} · {payout.recipient.firstName} {payout.recipient.lastName}</b><small>{formatNaira(Number(payout.amountKobo) / 100)} · {transactionLabel(payout.status)}</small></span><code>{payout.providerReference ?? "Bank transfer not created"}</code></li>)}</ul> : <p>No payouts have been allocated yet.</p>}</section>
       <section className="admin-transaction-audit"><h3>Ledger movements</h3>{selected.ledgerEntries.length ? <ul>{selected.ledgerEntries.map((entry) => <li key={entry.id}><span><b>{transactionLabel(entry.entryType)}</b><small>{entry.debitAccount} → {entry.creditAccount}</small></span><b>{formatNaira(Number(entry.amountKobo) / 100)}</b></li>)}</ul> : <p>No ledger entries have been recorded yet.</p>}</section>
     </> : <div className="admin-live-empty"><ReceiptText size={19} /> Select a transaction to inspect its audit trail.</div>}</aside></div>
   </div></Shell>;

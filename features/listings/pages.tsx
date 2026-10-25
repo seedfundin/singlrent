@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import { useEffect, useState, type FormEvent } from "react";
-import dynamic from "next/dynamic";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useState, type FormEvent } from 'react';
+import dynamic from 'next/dynamic';
+import { useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   ArrowRight,
@@ -10,9 +10,13 @@ import {
   Bath,
   BedDouble,
   CalendarDays,
+  Check,
+  ChevronLeft,
+  ChevronRight,
   CircleAlert,
   CircleCheck,
   Clock3,
+  Copy,
   Grid2X2,
   Heart,
   House,
@@ -23,17 +27,20 @@ import {
   Sparkles,
   Upload,
   Video,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { useAppSession } from "@/features/app/app-provider";
-import { api, type ApiListing } from "@/lib/api";
-import { formatNaira } from "@/lib/pricing";
+  X,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useAppSession } from '@/features/app/app-provider';
+import { InspectionRequest } from '@/features/inspections/inspections';
+import { ListingReviews } from '@/features/reviews/listing-reviews';
+import { api, type ApiListing } from '@/lib/api';
+import { formatNaira } from '@/lib/pricing';
 import {
   Back,
   PublicHeader,
   Status,
   type Navigate,
-} from "@/features/app/shell";
+} from '@/features/app/shell';
 import {
   ListingCard,
   ListingPhoto,
@@ -41,15 +48,16 @@ import {
   listingLocation,
   listingVideo,
   nairaFromKobo,
-} from "@/features/listings/listing-card";
+} from '@/features/listings/listing-card';
 import {
   GooglePropertyMap,
   type PropertyCoordinates,
-} from "@/features/maps/google-property-map";
-import "@/features/maps/google-listings-map.css";
+} from '@/features/maps/google-property-map';
+import '@/features/maps/google-listings-map.css';
+import '@/features/listings/listing-details.css';
 
 const GoogleStreetView = dynamic(
-  () => import("@/features/maps/google-street-view"),
+  () => import('@/features/maps/google-street-view'),
   {
     ssr: false,
     loading: () => (
@@ -59,8 +67,16 @@ const GoogleStreetView = dynamic(
 );
 
 const GoogleListingsMap = dynamic(
-  () => import("@/features/maps/google-listings-map"),
-  { ssr: false, loading: () => <div className="map listing-map-unavailable"><Clock3 size={22} /><p>Loading map…</p></div> },
+  () => import('@/features/maps/google-listings-map'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="map listing-map-unavailable">
+        <Clock3 size={22} />
+        <p>Loading map…</p>
+      </div>
+    ),
+  },
 );
 
 function listingCoordinates(listing: ApiListing): PropertyCoordinates | null {
@@ -76,7 +92,114 @@ function listingCoordinates(listing: ApiListing): PropertyCoordinates | null {
     : null;
 }
 
-type LocationView = "map" | "street-view" | null;
+type LocationView = 'map' | 'street-view' | null;
+
+function ListingGalleryDialog({
+  images,
+  listingTitle,
+  open,
+  index,
+  onClose,
+  onIndexChange,
+}: {
+  images: ReturnType<typeof listingImages>;
+  listingTitle: string;
+  open: boolean;
+  index: number;
+  onClose: () => void;
+  onIndexChange: (index: number) => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+      if (event.key === 'ArrowLeft' && images.length > 1)
+        onIndexChange((index - 1 + images.length) % images.length);
+      if (event.key === 'ArrowRight' && images.length > 1)
+        onIndexChange((index + 1) % images.length);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [images.length, index, onClose, onIndexChange, open]);
+
+  if (!open) return null;
+  const selected = images[index];
+  return (
+    <div
+      className="listing-media-dialog-backdrop"
+      role="presentation"
+      onMouseDown={onClose}
+    >
+      <section
+        className="listing-media-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${listingTitle} photo gallery`}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <span>
+            {images.length
+              ? `Photo ${index + 1} of ${images.length}`
+              : 'Property gallery'}
+          </span>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={onClose}
+            aria-label="Close property gallery"
+          >
+            <X size={17} />
+          </Button>
+        </header>
+        {selected ? (
+          <img src={selected.url} alt={selected.altText ?? listingTitle} />
+        ) : (
+          <div className="listing-media-empty">
+            <House size={28} />
+            <p>The landlord has not added photos yet.</p>
+          </div>
+        )}
+        {images.length > 1 && (
+          <>
+            <Button
+              className="listing-media-nav previous"
+              variant="outline"
+              size="icon"
+              onClick={() =>
+                onIndexChange((index - 1 + images.length) % images.length)
+              }
+              aria-label="Previous photo"
+            >
+              <ChevronLeft size={20} />
+            </Button>
+            <Button
+              className="listing-media-nav next"
+              variant="outline"
+              size="icon"
+              onClick={() => onIndexChange((index + 1) % images.length)}
+              aria-label="Next photo"
+            >
+              <ChevronRight size={20} />
+            </Button>
+            <footer>
+              {images.map((image, itemIndex) => (
+                <button
+                  key={image.id}
+                  className={itemIndex === index ? 'active' : ''}
+                  onClick={() => onIndexChange(itemIndex)}
+                  aria-label={`Show photo ${itemIndex + 1}`}
+                >
+                  <img src={image.url} alt="" />
+                </button>
+              ))}
+            </footer>
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
 
 function PropertyLocation({
   coordinates,
@@ -115,23 +238,23 @@ function PropertyLocation({
             <button
               type="button"
               role="tab"
-              aria-selected={view === "map"}
-              className={view === "map" ? "active" : ""}
-              onClick={() => onViewChange("map")}
+              aria-selected={view === 'map'}
+              className={view === 'map' ? 'active' : ''}
+              onClick={() => onViewChange('map')}
             >
               Map
             </button>
             <button
               type="button"
               role="tab"
-              aria-selected={view === "street-view"}
-              className={view === "street-view" ? "active" : ""}
-              onClick={() => onViewChange("street-view")}
+              aria-selected={view === 'street-view'}
+              className={view === 'street-view' ? 'active' : ''}
+              onClick={() => onViewChange('street-view')}
             >
               Street View
             </button>
           </div>
-          {view === "map" ? (
+          {view === 'map' ? (
             <GooglePropertyMap value={coordinates} />
           ) : (
             <GoogleStreetView coordinates={coordinates} />
@@ -148,14 +271,14 @@ function PropertyLocation({
             </small>
           </span>
           <div>
-            <Button type="button" size="sm" onClick={() => onViewChange("map")}>
+            <Button type="button" size="sm" onClick={() => onViewChange('map')}>
               <Map size={14} /> View map
             </Button>
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => onViewChange("street-view")}
+              onClick={() => onViewChange('street-view')}
             >
               View Street View
             </Button>
@@ -170,9 +293,10 @@ export function ExploreHomes({ go }: { go: Navigate }) {
   // The map is opt-in. Listing cards load first and no Google map request is
   // made until the visitor explicitly selects Map.
   const [map, setMap] = useState(false);
-  const [areaInput, setAreaInput] = useState("");
-  const [area, setArea] = useState("");
-  const [bedrooms, setBedrooms] = useState("");
+  const [areaInput, setAreaInput] = useState('');
+  const [area, setArea] = useState('');
+  const [bedrooms, setBedrooms] = useState('');
+  const [sort, setSort] = useState<'RECENT' | 'RECOMMENDED'>('RECENT');
   const [listings, setListings] = useState<ApiListing[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -186,6 +310,7 @@ export function ExploreHomes({ go }: { go: Navigate }) {
         pageSize: 12,
         area: area || undefined,
         bedrooms: bedrooms ? Number(bedrooms) : undefined,
+        sort,
       })
       .then((response) => {
         if (active) {
@@ -197,14 +322,14 @@ export function ExploreHomes({ go }: { go: Navigate }) {
         (cause: unknown) =>
           active &&
           setError(
-            cause instanceof Error ? cause.message : "Unable to load homes.",
+            cause instanceof Error ? cause.message : 'Unable to load homes.',
           ),
       )
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
-  }, [area, bedrooms]);
+  }, [area, bedrooms, sort]);
   const search = (event: FormEvent) => {
     event.preventDefault();
     setArea(areaInput.trim());
@@ -219,11 +344,11 @@ export function ExploreHomes({ go }: { go: Navigate }) {
             <h1>Find your next space</h1>
             <p>
               {loading
-                ? "Searching homes…"
-                : `${total} ${total === 1 ? "home" : "homes"} available now`}
+                ? 'Searching homes…'
+                : `${total} ${total === 1 ? 'home' : 'homes'} available now`}
             </p>
           </span>
-          <Button variant="outline" onClick={() => go("home")}>
+          <Button variant="outline" onClick={() => go('home')}>
             <ArrowLeft size={14} /> Back home
           </Button>
         </div>
@@ -248,8 +373,8 @@ export function ExploreHomes({ go }: { go: Navigate }) {
               {[0, 1, 2, 3, 4].map((count) => (
                 <option key={count} value={count}>
                   {count === 0
-                    ? "Studio"
-                    : `${count} ${count === 1 ? "bedroom" : "bedrooms"}`}
+                    ? 'Studio'
+                    : `${count} ${count === 1 ? 'bedroom' : 'bedrooms'}`}
                 </option>
               ))}
             </select>
@@ -257,17 +382,27 @@ export function ExploreHomes({ go }: { go: Navigate }) {
           <Button type="submit" size="sm">
             <Search size={14} /> Search
           </Button>
+          <label className="listing-filter-field">
+            <select
+              value={sort}
+              onChange={(event) => setSort(event.target.value as typeof sort)}
+              aria-label="Listing order"
+            >
+              <option value="RECENT">Newest listings</option>
+              <option value="RECOMMENDED">Recommended</option>
+            </select>
+          </label>
           <span>
             <button
               type="button"
-              className={!map ? "on" : ""}
+              className={!map ? 'on' : ''}
               onClick={() => setMap(false)}
             >
               <Grid2X2 size={14} /> List
             </button>
             <button
               type="button"
-              className={map ? "on" : ""}
+              className={map ? 'on' : ''}
               onClick={() => setMap(true)}
             >
               <Map size={14} /> Map
@@ -277,8 +412,18 @@ export function ExploreHomes({ go }: { go: Navigate }) {
         <div className="search-layout">
           <section>
             <p className="sort">
-              <b>Available listings</b>
+              <b>
+                {sort === 'RECOMMENDED'
+                  ? 'Recommended listings'
+                  : 'Available listings'}
+              </b>
               {area && <i>{area} ×</i>}
+              {sort === 'RECOMMENDED' && (
+                <small>
+                  Recommendations use verified reviews as a limited secondary
+                  signal. New properties remain neutral.
+                </small>
+              )}
             </p>
             {loading ? (
               <div className="listing-state">
@@ -302,8 +447,29 @@ export function ExploreHomes({ go }: { go: Navigate }) {
           </section>
           {map && (
             <aside className="map listing-map-live">
-              <div className="map-heading"><span><Map size={18} /><b>Available homes on the map</b></span><Button variant="ghost" size="sm" onClick={() => setMap(false)}>Hide map</Button></div>
-              {loading ? <div className="listing-state"><Clock3 size={17} /> Loading homes…</div> : error ? <div className="listing-state error"><CircleAlert size={17} /> {error}</div> : <GoogleListingsMap listings={listings} onSelect={(listing) => go("listing", { listing: listing.id })} />}
+              <div className="map-heading">
+                <span>
+                  <Map size={18} />
+                  <b>Available homes on the map</b>
+                </span>
+                <Button variant="ghost" size="sm" onClick={() => setMap(false)}>
+                  Hide map
+                </Button>
+              </div>
+              {loading ? (
+                <div className="listing-state">
+                  <Clock3 size={17} /> Loading homes…
+                </div>
+              ) : error ? (
+                <div className="listing-state error">
+                  <CircleAlert size={17} /> {error}
+                </div>
+              ) : (
+                <GoogleListingsMap
+                  listings={listings}
+                  onSelect={(listing) => go('listing', { listing: listing.id })}
+                />
+              )}
             </aside>
           )}
         </div>
@@ -321,16 +487,18 @@ export function ListingDetails({
 }) {
   const { session } = useAppSession();
   const searchParams = useSearchParams();
-  const listingId = searchParams.get("listing");
+  const listingId = searchParams.get('listing');
   const [listing, setListing] = useState<ApiListing | null>(null);
   const [loading, setLoading] = useState(Boolean(listingId));
   const [error, setError] = useState<string | null>(
-    listingId
-      ? null
-      : "Choose a home from Explore homes to view its details.",
+    listingId ? null : 'Choose a home from Explore homes to view its details.',
   );
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [galleryIndex, setGalleryIndex] = useState(0);
+  const [sharing, setSharing] = useState(false);
+  const [shareNotice, setShareNotice] = useState<string | null>(null);
   // Maps are deliberately opt-in: mounting either component starts a Google Maps request.
   const [locationView, setLocationView] = useState<LocationView>(null);
   const images = listing ? listingImages(listing) : [];
@@ -342,7 +510,7 @@ export function ListingDetails({
     setError(null);
     setLocationView(null);
     api.listings
-      .detail(listingId)
+      .detail(listingId, session?.accessToken)
       .then((response) => active && setListing(response))
       .catch(
         (cause: unknown) =>
@@ -350,18 +518,34 @@ export function ListingDetails({
           setError(
             cause instanceof Error
               ? cause.message
-              : "Unable to load this home.",
+              : 'Unable to load this home.',
           ),
       )
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
-  }, [listingId]);
+  }, [listingId, session]);
+  useEffect(() => {
+    if (!listing || !session) {
+      setSaved(false);
+      return;
+    }
+    let active = true;
+    api.listings
+      .savedState(session.accessToken, listing.id)
+      .then((response) => active && setSaved(response.saved))
+      // Saving a property is a convenience feature. A transient lookup failure
+      // must not make the public property page fail to render.
+      .catch(() => active && setSaved(false));
+    return () => {
+      active = false;
+    };
+  }, [listing, session]);
   const toggleSave = async () => {
     if (!listing) return;
     if (!session) {
-      go("sign-in");
+      go('sign-in');
       return;
     }
     setSaving(true);
@@ -374,22 +558,59 @@ export function ListingDetails({
       setError(
         cause instanceof Error
           ? cause.message
-          : "Unable to update your saved homes.",
+          : 'Unable to update your saved homes.',
       );
     } finally {
       setSaving(false);
     }
   };
+  const openGallery = (index = 0) => {
+    setGalleryIndex(
+      Math.min(Math.max(index, 0), Math.max(images.length - 1, 0)),
+    );
+    setGalleryOpen(true);
+  };
+  const shareListing = async () => {
+    if (!listing) return;
+    setSharing(true);
+    setShareNotice(null);
+    const url = new URL(window.location.href);
+    url.searchParams.set('listing', listing.id);
+    const payload = {
+      title: listing.title,
+      text: `Have a look at ${listing.title} on SingleRent.`,
+      url: url.toString(),
+    };
+    try {
+      if (navigator.share) await navigator.share(payload);
+      else {
+        await navigator.clipboard.writeText(payload.url);
+        setShareNotice('Link copied');
+      }
+    } catch (cause) {
+      // Closing the native share sheet is intentional and should not surface as an error.
+      if (cause instanceof Error && cause.name !== 'AbortError') {
+        try {
+          await navigator.clipboard.writeText(payload.url);
+          setShareNotice('Link copied');
+        } catch {
+          setShareNotice('Unable to copy the share link.');
+        }
+      }
+    } finally {
+      setSharing(false);
+    }
+  };
   // Asking questions is not a transaction. A signed-in user can go straight to
   // the property conversation; an unauthenticated visitor only needs to sign
   // in (and never complete KYC) before doing so.
-  const openPropertyConversation = (mode: "ai" | "landlord") => {
+  const openPropertyConversation = (mode: 'ai' | 'landlord') => {
     if (!session) {
       onSignInRequired();
       return;
     }
     if (!listing) return;
-    go("assistant", { listing: listing.id, mode });
+    go('assistant', { listing: listing.id, mode });
   };
   return (
     <>
@@ -398,11 +619,27 @@ export function ListingDetails({
         <div className="top">
           <Back go={go} to="explore" />
           <span>
-            <Button variant="outline" size="icon">
-              <Heart size={16} />
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={saving}
+              onClick={() => void toggleSave()}
+              aria-label={saved ? 'Remove from saved homes' : 'Save home'}
+            >
+              <Heart size={16} fill={saved ? 'currentColor' : 'none'} />
             </Button>
-            <Button variant="outline" size="icon">
-              <Upload size={16} />
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={sharing}
+              onClick={() => void shareListing()}
+              aria-label="Share this home"
+            >
+              {shareNotice === 'Link copied' ? (
+                <Check size={16} />
+              ) : (
+                <Upload size={16} />
+              )}
             </Button>
           </span>
         </div>
@@ -420,7 +657,7 @@ export function ListingDetails({
               <section className="gallery">
                 <div>
                   <ListingPhoto listing={listing} />
-                  <button>
+                  <button onClick={() => openGallery(0)}>
                     <Grid2X2 size={14} /> View all {images.length} photos
                   </button>
                 </div>
@@ -444,9 +681,20 @@ export function ListingDetails({
                     ) : (
                       <ListingPhoto listing={listing} />
                     )}
-                    <button>
-                      <Video size={14} />{" "}
-                      {video ? "Video tour included" : "Property photos"}
+                    <button
+                      onClick={() =>
+                        video
+                          ? document
+                              .getElementById('listing-video-tour')
+                              ?.scrollIntoView({
+                                behavior: 'smooth',
+                                block: 'center',
+                              })
+                          : openGallery(0)
+                      }
+                    >
+                      <Video size={14} />{' '}
+                      {video ? 'Video tour included' : 'Property photos'}
                     </button>
                   </span>
                 </div>
@@ -460,7 +708,7 @@ export function ListingDetails({
                       </Status>
                       <h1>{listing.title}</h1>
                       <p>
-                        <MapPin size={15} /> {listing.address},{" "}
+                        <MapPin size={15} /> {listing.address},{' '}
                         {listingLocation(listing)}
                       </p>
                     </span>
@@ -468,10 +716,10 @@ export function ListingDetails({
                       onClick={toggleSave}
                       disabled={saving}
                       aria-label={
-                        saved ? "Remove from saved homes" : "Save home"
+                        saved ? 'Remove from saved homes' : 'Save home'
                       }
                     >
-                      <Heart size={18} fill={saved ? "currentColor" : "none"} />
+                      <Heart size={18} fill={saved ? 'currentColor' : 'none'} />
                     </button>
                   </div>
                   <div className="facts">
@@ -499,13 +747,14 @@ export function ListingDetails({
                     <span>
                       <CalendarDays />
                       <b>
-                        {listing.availability === "AVAILABLE"
-                          ? "Now"
+                        {listing.availability === 'AVAILABLE'
+                          ? 'Now'
                           : listing.availability.toLowerCase()}
                         <small>Availability</small>
                       </b>
                     </span>
                   </div>
+                  <ListingReviews listing={listing} />
                   <PropertyLocation
                     coordinates={listingCoordinates(listing)}
                     view={locationView}
@@ -528,7 +777,7 @@ export function ListingDetails({
                     </p>
                   )}
                   {video && (
-                    <section className="listing-video">
+                    <section className="listing-video" id="listing-video-tour">
                       <h2>Video tour</h2>
                       <video controls preload="metadata" src={video.url}>
                         Your browser cannot play this property video.
@@ -543,50 +792,80 @@ export function ListingDetails({
                         {listing.landlord.firstName} {listing.landlord.lastName}
                       </b>
                       <small>
-                        {listing.source === "AGENT"
-                          ? "Managed by an agent"
-                          : "Direct landlord listing"}
+                        {listing.source === 'AGENT'
+                          ? 'Managed by an agent'
+                          : 'Direct landlord listing'}
                       </small>
                     </span>
-                    <Button variant="outline" onClick={() => openPropertyConversation("landlord")}>
-                      <MessageCircle size={14} /> Ask landlord
+                    <Button
+                      variant="outline"
+                      onClick={() => openPropertyConversation('ai')}
+                    >
+                      <MessageCircle size={14} /> Ask Property Assistant
                     </Button>
                   </div>
                 </article>
                 <aside className="rent">
                   <b>
-                    {formatNaira(nairaFromKobo(listing.annualRentKobo))}{" "}
+                    {formatNaira(nairaFromKobo(listing.annualRentKobo))}{' '}
                     <small>/ year</small>
                   </b>
                   <p>
-                    {formatNaira(nairaFromKobo(listing.annualRentKobo) / 12)}{" "}
+                    {formatNaira(nairaFromKobo(listing.annualRentKobo) / 12)}{' '}
                     monthly equivalent
                   </p>
                   <hr />
                   <span>
-                    Property is available{" "}
+                    Property is available{' '}
                     <Status
                       tone={
-                        listing.availability === "AVAILABLE" ? "green" : "slate"
+                        listing.availability === 'AVAILABLE' ? 'green' : 'slate'
                       }
                     >
                       {listing.availability.toLowerCase()}
                     </Status>
                   </span>
                   <Button
-                    onClick={() => session ? go("apply", { listing: listing.id }) : onSignInRequired()}
-                    disabled={listing.availability !== "AVAILABLE"}
+                    onClick={() =>
+                      session
+                        ? go('apply', { listing: listing.id })
+                        : onSignInRequired()
+                    }
+                    disabled={listing.availability !== 'AVAILABLE'}
                   >
                     Rent this home <ArrowRight size={15} />
                   </Button>
-                  <Button variant="outline" onClick={() => openPropertyConversation("ai")}>
+                  <Button
+                    variant="outline"
+                    onClick={() => openPropertyConversation('ai')}
+                  >
                     <Sparkles size={15} /> Ask about this home
                   </Button>
+                  {listing.status === 'PUBLISHED' &&
+                    listing.availability === 'AVAILABLE' && (
+                      <InspectionRequest
+                        listingId={listing.id}
+                        onSignIn={onSignInRequired}
+                      />
+                    )}
                   <small>
-                    <CircleCheck size={14} /> Secure rent payment held in escrow
+                    <CircleCheck size={14} /> Secure rent payment held until move-in checks are complete
                   </small>
                 </aside>
               </div>
+              {shareNotice && (
+                <p className="listing-share-notice" role="status">
+                  <Copy size={13} /> {shareNotice}
+                </p>
+              )}
+              <ListingGalleryDialog
+                images={images}
+                listingTitle={listing.title}
+                open={galleryOpen}
+                index={galleryIndex}
+                onClose={() => setGalleryOpen(false)}
+                onIndexChange={setGalleryIndex}
+              />
             </>
           )
         )}

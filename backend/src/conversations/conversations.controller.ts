@@ -5,6 +5,8 @@ import { AuthenticatedUser } from '../common/types/authenticated-user';
 import { ZodValidationPipe } from '../common/validation/zod-validation.pipe';
 import { ConversationQuery, conversationQuerySchema, CreateConversationRequest, createConversationSchema, SendMessageRequest, sendMessageSchema } from './dto/conversation.schemas';
 import { ConversationsService } from './conversations.service';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RoleCode } from '@prisma/client';
 
 @ApiTags('Conversations')
 @ApiBearerAuth()
@@ -23,6 +25,22 @@ export class ConversationsController {
     @Body(new ZodValidationPipe(createConversationSchema)) input: CreateConversationRequest,
   ) {
     return this.conversationsService.create(user.userId, input);
+  }
+
+  @Get('escalations')
+  escalations(@CurrentUser() user: AuthenticatedUser) {
+    return this.conversationsService.escalations(user.userId);
+  }
+
+  @Get('monitoring')
+  @Roles(RoleCode.ADMIN, RoleCode.SUPER_ADMIN)
+  monitoring(@Query() query: Record<string, string>) {
+    return this.conversationsService.monitoring(query);
+  }
+
+  @Post('escalations/:escalationId/reply')
+  reply(@CurrentUser() user: AuthenticatedUser, @Param('escalationId') id: string, @Body(new ZodValidationPipe(sendMessageSchema)) input: SendMessageRequest) {
+    return this.conversationsService.replyToEscalation(user.userId, id, input.body);
   }
 
   @Get(':conversationId')

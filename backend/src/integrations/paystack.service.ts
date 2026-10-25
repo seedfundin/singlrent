@@ -38,7 +38,7 @@ export class PaystackService {
     const accessCode = asString(data?.access_code);
     const reference = asString(data?.reference);
     if (!authorizationUrl || !accessCode || !reference) {
-      throw new BadGatewayException('Paystack returned an invalid transaction initialization response');
+      throw new BadGatewayException('The payment service returned an invalid transaction initialization response');
     }
     return { authorizationUrl, accessCode, reference };
   }
@@ -50,7 +50,7 @@ export class PaystackService {
     const verifiedReference = asString(data?.reference);
     const currency = asString(data?.currency);
     if (amount === undefined || !status || !verifiedReference || !currency) {
-      throw new BadGatewayException('Paystack returned an invalid transaction verification response');
+      throw new BadGatewayException('The payment service returned an invalid transaction verification response');
     }
     return { amountKobo: BigInt(amount), status, reference: verifiedReference, currency, payload: data };
   }
@@ -58,7 +58,7 @@ export class PaystackService {
   async listNigerianBanks() {
     const data = asArray(await this.request('/bank?country=nigeria&currency=NGN&perPage=100', { method: 'GET' }));
     if (!data) {
-      throw new BadGatewayException('Paystack returned an invalid bank list');
+      throw new BadGatewayException('The payment service returned an invalid bank list');
     }
     return data
       .map((entry) => asObject(entry))
@@ -87,7 +87,7 @@ export class PaystackService {
     const accountName = asString(details?.account_name) ?? asString(data?.name);
     const bankName = asString(details?.bank_name);
     if (!recipientCode || !accountName || !bankName) {
-      throw new BadGatewayException('Paystack returned an invalid transfer recipient');
+      throw new BadGatewayException('The payment service returned an invalid transfer recipient');
     }
     return { recipientCode, accountName, bankName };
   }
@@ -108,7 +108,7 @@ export class PaystackService {
     const reference = asString(data?.reference);
     const status = asString(data?.status);
     if (!transferCode || !reference || !status) {
-      throw new BadGatewayException('Paystack returned an invalid transfer response');
+      throw new BadGatewayException('The payment service returned an invalid transfer response');
     }
     return { transferCode, reference, status };
   }
@@ -116,7 +116,7 @@ export class PaystackService {
   private async request(path: string, init: RequestInit): Promise<unknown> {
     const secret = this.configService.get<string>('PAYSTACK_SECRET_KEY');
     if (!secret) {
-      throw new ServiceUnavailableException('Paystack is not configured');
+      throw new ServiceUnavailableException('The payment service is not configured');
     }
     const baseUrl = this.configService.getOrThrow<string>('PAYSTACK_BASE_URL').replace(/\/$/, '');
     const response = await fetch(`${baseUrl}${path}`, {
@@ -124,13 +124,17 @@ export class PaystackService {
       headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json', ...init.headers },
     }).catch(() => undefined);
     if (!response) {
-      throw new ServiceUnavailableException('Unable to reach Paystack');
+      throw new ServiceUnavailableException('Unable to reach the payment service');
     }
     const payload: unknown = await response.json().catch(() => undefined);
     const root = asObject(payload);
     const data = root?.data;
     if (!response.ok || !root?.status || data === undefined || data === null) {
-      throw new BadGatewayException(asString(root?.message) ?? 'Paystack request failed');
+      const providerMessage = asString(root?.message);
+      const meta = asObject(root?.meta);
+      const nextStep = asString(meta?.next_step) ?? asString(meta?.nextStep);
+      const detail = [providerMessage, nextStep].filter(Boolean).join(' ');
+      throw new BadGatewayException(detail ? `Bank transfer could not be completed: ${detail}` : 'Bank transfer could not be completed. Please try again shortly.');
     }
     return data;
   }

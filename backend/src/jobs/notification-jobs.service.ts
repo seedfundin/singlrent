@@ -8,7 +8,8 @@ export interface NotificationJob {
   userId: string;
   title: string;
   body: string;
-  channel: 'EMAIL' | 'IN_APP';
+  channel: 'EMAIL' | 'IN_APP' | 'PUSH';
+  conversationId?: string;
 }
 
 @Injectable()
@@ -18,6 +19,10 @@ export class NotificationJobsService {
   enqueue(data: NotificationJob): Promise<void> {
     return this.notificationsQueue
       .add('deliver-notification', data, {
+        // Re-enqueueing the same notification must not submit the same channel twice.
+        jobId: `notification-${data.notificationId}-${data.channel}`,
+        // Coalesce only repeated conversation push alerts; transactional events remain independent.
+        ...(data.channel === 'PUSH' && data.conversationId ? { deduplication: { id: `message-${data.userId}-${data.conversationId}`, ttl: 60_000 } } : {}),
         attempts: 3,
         backoff: { type: 'exponential', delay: 1_000 },
         removeOnComplete: 1_000,

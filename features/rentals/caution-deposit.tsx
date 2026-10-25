@@ -70,11 +70,11 @@ export function CautionDeposit({ go }: { go: Navigate }) {
   const selected = useMemo(() => payments.find((payment) => payment.id === selectedId) ?? null, [payments, selectedId]);
 
   if (!session) {
-    return <Shell go={go} role="tenant" title="Caution deposit"><div className="page rental-flow"><section className="rental-empty"><ShieldCheck size={24} /><h1>Sign in to view caution deposits</h1><p>Only transaction participants can view their escrowed caution records.</p><Button onClick={() => go("sign-in")}>Sign in</Button></section></div></Shell>;
+    return <Shell go={go} role="tenant" title="Caution deposit"><div className="page rental-flow"><section className="rental-empty"><ShieldCheck size={24} /><h1>Sign in to view caution deposits</h1><p>Only transaction participants can view their protected caution records.</p><Button onClick={() => go("sign-in")}>Sign in</Button></section></div></Shell>;
   }
 
   return <Shell go={go} role={role} title="Caution deposit"><div className="page rental-flow caution-deposit-live">
-    <div className="rental-flow-heading"><span><small>Escrowed caution</small><h1>Caution deposit records</h1><p>These records are taken directly from completed rental payments and their related escrow entries.</p></span></div>
+    <div className="rental-flow-heading"><span><small>Protected caution</small><h1>Caution deposit records</h1><p>These records are taken directly from completed rental payments and their protected-payment records.</p></span></div>
     {error && <p className="rental-alert error"><CircleAlert size={15} /> {error}</p>}
     {loading ? <section className="rental-empty"><LoaderCircle className="spin" size={24} /><h1>Loading caution deposits…</h1></section> : payments.length ? <div className="caution-live-layout">
       <section className="panel caution-live-list">
@@ -86,9 +86,9 @@ export function CautionDeposit({ go }: { go: Navigate }) {
       </section>
       {selected && <section className="panel caution-live-detail">
         <div className="subhead"><span><small>Selected deposit</small><h2>{selected.listing.title}</h2></span><Status tone={tone(selected.escrow?.cautionStatus ?? "")}>{label(selected.escrow?.cautionStatus ?? "unknown")}</Status></div>
-        <dl className="transaction-summary"><div><dt>Caution held</dt><dd>{formatNaira(Number(selected.cautionFeeKobo) / 100)}</dd></div><div><dt>SingleRent reference</dt><dd><code>{selected.transactionReference}</code></dd></div><div><dt>Escrow status</dt><dd>{label(selected.escrow?.status ?? "not created")}</dd></div></dl>
+        <dl className="transaction-summary"><div><dt>Caution held</dt><dd>{formatNaira(Number(selected.cautionFeeKobo) / 100)}</dd></div><div><dt>SingleRent reference</dt><dd><code>{selected.transactionReference}</code></dd></div><div><dt>Payment protection status</dt><dd>{label(selected.escrow?.status ?? "not created")}</dd></div></dl>
         <EscrowSettlement payment={selected} tenancy={tenancies.find((tenancy) => tenancy.applicationId === selected.applicationId)} role={role} token={session.accessToken} onRefresh={load} />
       </section>}
-    </div> : <section className="rental-empty"><Landmark size={24} /><h1>No caution-fee escrow records yet</h1><p>Records appear here only after a rental payment includes a caution fee and creates its escrow entry.</p></section>}
+    </div> : <section className="rental-empty"><Landmark size={24} /><h1>No protected caution records yet</h1><p>Records appear here after a rental payment includes a caution fee and its protected-payment record is created.</p></section>}
   </div></Shell>;
 }

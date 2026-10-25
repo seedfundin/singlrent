@@ -1,13 +1,97 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, BadgeCheck, BedDouble, Building2, CalendarDays, ChevronDown, Home, KeyRound, MapPin, MessageCircle, Search, ShieldCheck, UserRound, Users, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LiveListings } from "@/features/listings/listing-card";
+import { hasGoogleMapsApiKey, loadGoogleMaps } from "@/features/maps/google-maps-loader";
 import { Img, PublicHeader, Status, type Navigate } from "@/features/app/shell";
 import { SiteFooter } from "@/features/public/site-footer";
 
+const defaultLocationLabel = "Lagos, Abuja, Ibadan, Enugu...";
+
+type AddressComponent = {
+  long_name?: string;
+  types?: string[];
+};
+
+type GeocodingResult = {
+  address_components?: AddressComponent[];
+};
+
+type GoogleGeocoder = {
+  geocode: (
+    request: { location: { lat: number; lng: number } },
+    callback: (results: GeocodingResult[] | null, status: string) => void,
+  ) => void;
+};
+
+type GoogleMapsWithGeocoder = {
+  Geocoder?: new () => GoogleGeocoder;
+};
+
+function nearestAreaName(results: GeocodingResult[] | null | undefined): string | null {
+  const components = results?.flatMap((result) => result.address_components ?? []) ?? [];
+  const preferredTypes = [
+    "neighborhood",
+    "sublocality_level_1",
+    "sublocality",
+    "locality",
+    "administrative_area_level_2",
+    "administrative_area_level_1",
+  ];
+
+  for (const type of preferredTypes) {
+    const name = components.find((component) => component.types?.includes(type))?.long_name?.trim();
+    if (name) return name;
+  }
+  return null;
+}
+
 export function Landing({ go }: { go: Navigate }) {
+  const [currentArea, setCurrentArea] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!("geolocation" in navigator) || !hasGoogleMapsApiKey()) return;
+
+    let active = true;
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        void loadGoogleMaps()
+          .then(() => {
+            const maps = (window as unknown as { google?: { maps?: GoogleMapsWithGeocoder } }).google?.maps;
+            const Geocoder = maps?.Geocoder;
+            if (!Geocoder) return;
+            const geocoder = new Geocoder();
+            geocoder.geocode(
+              {
+                location: {
+                  lat: position.coords.latitude,
+                  lng: position.coords.longitude,
+                },
+              },
+              (results: GeocodingResult[] | null, status: string) => {
+                if (!active || status !== "OK") return;
+                const area = nearestAreaName(results);
+                if (area) setCurrentArea(area);
+              },
+            );
+          })
+          // Location is a helpful enhancement. Keep the existing city list when it is unavailable.
+          .catch(() => undefined);
+      },
+      () => undefined,
+      { enableHighAccuracy: false, timeout: 7_000, maximumAge: 5 * 60_000 },
+    );
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const locationLabel = currentArea ?? defaultLocationLabel;
+
   return <>
     <PublicHeader go={go} />
     <div className="landing">
@@ -16,7 +100,7 @@ export function Landing({ go }: { go: Navigate }) {
           <span className="hero-kicker"><i /> Built for one-person moves, everywhere</span>
           <h1>Your own space.<br /><em>Without the agent wahala.</em></h1>
           <p>SingleRent helps corps members, young professionals and anyone moving solo find verified rooms, studios and shared flats — in the city they are heading to, directly from the people who own them.</p>
-          <div className="searchbox"><span><MapPin size={18} /><i>Where are you moving to?<b>Lagos, Abuja, Ibadan, Enugu...</b></i><ChevronDown size={16} /></span><Button onClick={() => go("explore")}><Search size={16} /> Find a room</Button></div>
+          <div className="searchbox"><span><MapPin size={18} /><i>Where are you moving to?<b>{locationLabel}</b></i><ChevronDown size={16} /></span><Button onClick={() => go("explore")}><Search size={16} /> Find a room</Button></div>
           <small className="trust"><BadgeCheck size={14} /> Published listings <ShieldCheck size={14} /> Direct landlord chat <KeyRound size={14} /> Protected payments</small>
         </motion.div>
         <motion.figure initial={{ opacity: 0, scale: 1.04 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.9, ease: "easeOut", delay: 0.12 }}>

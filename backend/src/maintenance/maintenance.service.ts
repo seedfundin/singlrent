@@ -107,6 +107,10 @@ export class MaintenanceService {
   async update(userId: string, requestId: string, input: UpdateMaintenanceRequest): Promise<MaintenanceView> {
     const request = await this.findAccessible(userId, requestId);
     const isManager = [request.landlordId, request.agentId, request.assignedToId].includes(userId);
+    const automaticStatusText = input.status ? `Status changed to ${input.status.toLowerCase().replace('_', ' ')}.` : null;
+    if (input.body && input.body !== automaticStatusText) {
+      throw new ForbiddenException('Direct maintenance messages are disabled. Use the Property Assistant for questions.');
+    }
     if ((input.status !== undefined || input.assignedToId !== undefined) && !isManager) {
       throw new ForbiddenException('Only the landlord, managing agent, or assignee can update maintenance status');
     }

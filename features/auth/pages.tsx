@@ -15,9 +15,16 @@ function destinationFor(session: ApiSession): View {
 }
 
 export function SignInPage() {
-  const { go } = useAppNavigation();
+  const { go, router } = useAppNavigation();
   const { setSession } = useAppSession();
-  return <SignIn go={go} onAuthenticated={(session) => { setSession(session); go(session.user.emailVerified ? destinationFor(session) : "verify-email"); }} />;
+  return <SignIn go={go} onAuthenticated={(session) => {
+    setSession(session);
+    const pending = sessionStorage.getItem('singlerent.notification.open');
+    if (session.user.emailVerified && pending && /^[0-9a-f-]{36}$/i.test(pending)) {
+      sessionStorage.removeItem('singlerent.notification.open');
+      router.push(`/notification-open?id=${encodeURIComponent(pending)}`);
+    } else go(session.user.emailVerified ? destinationFor(session) : "verify-email");
+  }} />;
 }
 
 export function SignUpPage() {
@@ -43,9 +50,9 @@ export function AccountTypePage() {
 }
 
 export function EmailVerificationPage() {
-  const { go } = useAppNavigation();
+  const { go, router } = useAppNavigation();
   const { session, setSession } = useAppSession();
-  return <EmailVerification go={go} session={session} onVerified={(nextSession) => { setSession(nextSession); go(destinationFor(nextSession)); }} />;
+  return <EmailVerification go={go} session={session} onVerified={(nextSession) => { setSession(nextSession); const pending = sessionStorage.getItem('singlerent.notification.open'); if (pending && /^[0-9a-f-]{36}$/i.test(pending)) { sessionStorage.removeItem('singlerent.notification.open'); router.push(`/notification-open?id=${encodeURIComponent(pending)}`); } else go(destinationFor(nextSession)); }} />;
 }
 
 export function KycPage() {

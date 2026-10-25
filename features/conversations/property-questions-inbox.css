@@ -1,0 +1,13 @@
+.property-questions-inbox .live-conversation-list button {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (max-width: 700px) {
+  .property-questions-inbox .live-conversation-list {
+    display: grid;
+    max-height: 180px;
+    overflow: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}

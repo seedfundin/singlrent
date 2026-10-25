@@ -51,6 +51,9 @@ export function ProfileSettings({ go }: { go: Navigate }) {
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<ApiFieldErrors>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const [deactivationPassword, setDeactivationPassword] = useState("");
+  const [deactivationConfirmation, setDeactivationConfirmation] = useState("");
+  const [deactivating, setDeactivating] = useState(false);
   const role = roleFor(session?.user.roles ?? []);
 
   const load = useCallback(async () => {
@@ -122,6 +125,24 @@ export function ProfileSettings({ go }: { go: Navigate }) {
     }
   };
 
+  const deactivate = async () => {
+    if (!session || deactivationConfirmation !== "DEACTIVATE") {
+      setError('Type DEACTIVATE to confirm account deactivation.');
+      return;
+    }
+    setDeactivating(true);
+    setError(null);
+    try {
+      await api.auth.deactivate(session.accessToken, { confirmation: "DEACTIVATE", currentPassword: deactivationPassword || undefined });
+      setSession(null);
+      go("home");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to deactivate your account.");
+    } finally {
+      setDeactivating(false);
+    }
+  };
+
   if (!session) {
     return <Shell go={go} role="tenant" title="Profile"><div className="page rental-flow"><section className="rental-empty"><UserRound size={24} /><h1>Sign in to manage your profile</h1><p>Profile information is available only to your signed-in account.</p><Button onClick={() => go("sign-in")}>Sign in</Button></section></div></Shell>;
   }
@@ -140,5 +161,6 @@ export function ProfileSettings({ go }: { go: Navigate }) {
       {profile.agentProfile && <><label>Company name<input aria-invalid={Boolean(fieldErrors.companyName)} value={form.companyName} maxLength={200} onChange={(event) => update("companyName", event.target.value)} /><ApiFieldError errors={fieldErrors} field="companyName" /></label><label>Licence number<input aria-invalid={Boolean(fieldErrors.licenceNumber)} value={form.licenceNumber} maxLength={100} onChange={(event) => update("licenceNumber", event.target.value)} /><ApiFieldError errors={fieldErrors} field="licenceNumber" /></label></>}
       <Button disabled={saving || !form.firstName.trim() || !form.lastName.trim()} onClick={() => void save()}>{saving ? <><LoaderCircle className="spin" size={14} /> Saving…</> : <><Save size={14} /> Save profile</>}</Button>
     </section> : <section className="rental-empty"><CircleAlert size={24} /><h1>Profile data is unavailable</h1><p>Try loading your profile again.</p><Button variant="outline" onClick={() => void load()}>Try again</Button></section>}
+    {!loading && profile && <section className="panel live-data-form profile-deactivation"><div className="subhead"><span><small>Account access</small><h2>Deactivate account</h2></span></div><p>Deactivation signs you out on every device and stops future sign-ins. Your records are retained for legal, payment and safety obligations; permanent deletion may require a support request.</p><label>Current password (required for password accounts)<input type="password" autoComplete="current-password" value={deactivationPassword} onChange={(event) => setDeactivationPassword(event.target.value)} /></label><label>Type <b>DEACTIVATE</b> to confirm<input value={deactivationConfirmation} onChange={(event) => setDeactivationConfirmation(event.target.value)} /></label><Button variant="destructive" disabled={deactivating || deactivationConfirmation !== "DEACTIVATE"} onClick={() => void deactivate()}>{deactivating ? <><LoaderCircle className="spin" size={14} /> Deactivating…</> : "Deactivate my account"}</Button></section>}
   </div></Shell>;
 }

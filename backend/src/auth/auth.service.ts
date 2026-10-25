@@ -1,8 +1,8 @@
-import { BadRequestException, ConflictException, Injectable, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma, RoleCode, User } from '@prisma/client';
-import { createHash, randomBytes, randomUUID } from 'crypto';
+import { createHash, createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'crypto';
 import { Request } from 'express';
 import { PasswordService } from '../common/auth/password.service';
 import { PrismaService } from '../common/database/prisma.service';
@@ -10,7 +10,8 @@ import { AuthenticatedUser, JwtPayload } from '../common/types/authenticated-use
 import { PermissionsService } from '../permissions/permissions.service';
 import { RolesService } from '../roles/roles.service';
 import { UsersService } from '../users/users.service';
-import { ConfirmEmailVerificationRequest, GoogleAuthRequest, LoginRequest, RefreshRequest, RegisterRequest } from './dto/auth.schemas';
+import { EmailDeliveryService } from '../common/email/email-delivery.service';
+import { ConfirmEmailVerificationRequest, ConfirmPasswordResetRequest, DeactivateAccountRequest, GoogleAuthRequest, LoginRequest, RefreshRequest, RegisterRequest, RequestPasswordResetRequest } from './dto/auth.schemas';
 
 export interface AuthSession {
   accessToken: string;
@@ -28,6 +29,8 @@ export interface AuthSession {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly usersService: UsersService,
@@ -36,6 +39,7 @@ export class AuthService {
     private readonly passwordService: PasswordService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly emailDelivery: EmailDeliveryService,
   ) {}
 
   async register(input: RegisterRequest, request: Request): Promise<AuthSession> {
@@ -50,6 +54,7 @@ export class AuthService {
         lastName: input.lastName,
         passwordHash,
         role: input.role,
+        dateOfBirth: input.dateOfBirth,
       });
     } catch (error: unknown) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -103,6 +108,7 @@ export class AuthService {
         firstName: givenName,
         lastName: familyName,
         role: input.role,
+        dateOfBirth: input.dateOfBirth,
       });
       await this.prisma.user.update({ where: { id: created.id }, data: { emailVerifiedAt: new Date() } });
       user = await this.usersService.findByEmail(email);
@@ -181,29 +187,99 @@ export class AuthService {
     if (user.emailVerifiedAt) {
       throw new ConflictException('Your email address has already been verified');
     }
-    return this.issueEmailChallenge(user);
+    return this.issueEmailChallenge(user, true);
   }
 
   async confirmEmailVerification(currentUser: AuthenticatedUser, input: ConfirmEmailVerificationRequest) {
     const now = new Date();
-    await this.prisma.$transaction(async (transaction) => {
+    const verified = await this.prisma.$transaction(async (transaction) => {
       const challenge = await transaction.emailVerificationChallenge.findFirst({
         where: { id: input.challengeId, userId: currentUser.userId },
       });
       if (!challenge || challenge.consumedAt || challenge.expiresAt <= now || challenge.attempts >= 5) {
         throw new BadRequestException('Email verification code is invalid or expired');
       }
-      if (this.hashVerificationCode(input.code) !== challenge.codeHash) {
-        await transaction.emailVerificationChallenge.update({
-          where: { id: challenge.id },
+      if (!this.matchesVerificationCode(input.code, challenge.codeHash)) {
+        await transaction.emailVerificationChallenge.updateMany({
+          where: { id: challenge.id, consumedAt: null, attempts: { lt: 5 }, expiresAt: { gt: now } },
           data: { attempts: { increment: 1 } },
         });
-        throw new BadRequestException('Email verification code is invalid');
+        // Returning commits the attempt count; throwing here would roll it back.
+        return false;
       }
-      await transaction.emailVerificationChallenge.update({ where: { id: challenge.id }, data: { consumedAt: now } });
+      const consumed = await transaction.emailVerificationChallenge.updateMany({ where: { id: challenge.id, consumedAt: null, attempts: { lt: 5 }, expiresAt: { gt: now } }, data: { consumedAt: now } });
+      if (consumed.count !== 1) return false;
       await transaction.user.update({ where: { id: currentUser.userId }, data: { emailVerifiedAt: now } });
+      return true;
     });
+    if (!verified) throw new BadRequestException('Email verification code is invalid');
     return { verified: true };
+  }
+
+  /** Always returns the same response to avoid disclosing which emails exist. */
+  async requestPasswordReset(input: RequestPasswordResetRequest, request: Request) {
+    const user = await this.usersService.findByEmail(input.email);
+    // The challenge id is an opaque public handle, not a credential. Returning
+    // a random handle for an unknown email lets the browser complete the same
+    // UI flow without revealing whether an account exists.
+    if (!user) return { requested: true, challengeId: randomUUID() };
+
+    const code = this.createOtp();
+    const now = new Date();
+    const challenge = await this.prisma.$transaction(async (transaction) => {
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`password-reset:${user.id}`}))`;
+      await transaction.passwordResetChallenge.updateMany({
+        where: { userId: user.id, consumedAt: null },
+        data: { consumedAt: now },
+      });
+      const created = await transaction.passwordResetChallenge.create({
+        data: {
+          userId: user.id,
+          codeHash: this.hashVerificationCode(code),
+          expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
+          requestedIp: request.ip,
+        },
+        select: { id: true, expiresAt: true },
+      });
+      return created;
+    });
+    await this.deliverSafely(() => this.emailDelivery.passwordResetCode(user.email, code), `password reset for ${user.id}`);
+    return {
+      requested: true,
+      challengeId: challenge.id,
+      ...(this.configService.get<string>('NODE_ENV') === 'development' ? { developmentCode: code } : {}),
+    };
+  }
+
+  async confirmPasswordReset(input: ConfirmPasswordResetRequest): Promise<void> {
+    const user = await this.usersService.findByEmail(input.email);
+    const now = new Date();
+    const valid = user ? await this.prisma.passwordResetChallenge.findFirst({ where: { id: input.challengeId, userId: user.id } }) : null;
+    if (!valid || valid.consumedAt || valid.expiresAt <= now || valid.attempts >= 5) {
+      throw new BadRequestException('Password reset code is invalid or expired');
+    }
+    if (!this.matchesVerificationCode(input.code, valid.codeHash)) {
+      await this.prisma.passwordResetChallenge.updateMany({ where: { id: valid.id, consumedAt: null, attempts: { lt: 5 }, expiresAt: { gt: now } }, data: { attempts: { increment: 1 } } });
+      throw new BadRequestException('Password reset code is invalid or expired');
+    }
+    const passwordHash = await this.passwordService.hash(input.password);
+    await this.prisma.$transaction(async (transaction) => {
+      const consumed = await transaction.passwordResetChallenge.updateMany({ where: { id: valid.id, consumedAt: null, attempts: { lt: 5 }, expiresAt: { gt: now } }, data: { consumedAt: now } });
+      if (consumed.count !== 1) throw new BadRequestException('Password reset code is invalid or expired');
+      await transaction.passwordResetChallenge.updateMany({ where: { userId: user!.id, consumedAt: null }, data: { consumedAt: now } });
+      await transaction.user.update({ where: { id: user!.id }, data: { passwordHash } });
+      await transaction.refreshToken.updateMany({ where: { userId: user!.id, revokedAt: null }, data: { revokedAt: now } });
+    });
+  }
+
+  async deactivateAccount(currentUser: AuthenticatedUser, input: DeactivateAccountRequest): Promise<void> {
+    const user = await this.usersService.findByIdOrThrow(currentUser.userId);
+    if (user.passwordHash) {
+      if (!input.currentPassword || !(await this.passwordService.verify(input.currentPassword, user.passwordHash))) {
+        throw new UnauthorizedException('Enter your current password to deactivate this account');
+      }
+    }
+    await this.usersService.deactivate(user.id);
   }
 
   async me(currentUser: AuthenticatedUser): Promise<AuthSession['user']> {
@@ -252,15 +328,20 @@ export class AuthService {
     };
   }
 
-  private async issueEmailChallenge(user: User) {
-    const code = String(Math.floor(100_000 + Math.random() * 900_000));
+  private async issueEmailChallenge(user: User, throttle = false) {
+    const code = this.createOtp();
     const now = new Date();
     const challenge = await this.prisma.$transaction(async (transaction) => {
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-verification:${user.id}`}))`;
+      if (throttle) {
+        const existing = await transaction.emailVerificationChallenge.findFirst({ where: { userId: user.id, consumedAt: null, expiresAt: { gt: now }, createdAt: { gte: new Date(now.getTime() - 60_000) } }, select: { id: true, expiresAt: true } });
+        if (existing) return { ...existing, send: false };
+      }
       await transaction.emailVerificationChallenge.updateMany({
         where: { userId: user.id, consumedAt: null },
         data: { consumedAt: now },
       });
-      return transaction.emailVerificationChallenge.create({
+      const created = await transaction.emailVerificationChallenge.create({
         data: {
           userId: user.id,
           email: user.email,
@@ -269,17 +350,38 @@ export class AuthService {
         },
         select: { id: true, expiresAt: true },
       });
+      return { ...created, send: true };
     });
 
-    // A delivery provider will replace this development-only disclosure.
+    if (challenge.send) await this.deliverSafely(() => this.emailDelivery.verificationCode(user.email, code), `email verification for ${user.id}`);
     return {
-      ...challenge,
-      ...(this.configService.get<string>('NODE_ENV') === 'development' ? { developmentCode: code } : {}),
+      id: challenge.id, expiresAt: challenge.expiresAt,
+      ...(challenge.send && this.configService.get<string>('NODE_ENV') === 'development' ? { developmentCode: code } : {}),
     };
   }
 
+  private createOtp(): string {
+    return String(randomInt(100_000, 1_000_000));
+  }
+
+  private async deliverSafely(deliver: () => Promise<unknown>, context: string): Promise<void> {
+    try {
+      await deliver();
+    } catch (cause) {
+      this.logger.error(`Email delivery failed for ${context}.`, cause instanceof Error ? cause.stack : undefined);
+    }
+  }
+
   private hashVerificationCode(value: string): string {
-    return createHash('sha256').update(value).digest('hex');
+    // Domain-separate OTP hashes from other uses of the existing server-only secret.
+    return createHmac('sha256', this.configService.getOrThrow<string>('JWT_ACCESS_SECRET')).update(`singlerent-otp:${value}`).digest('hex');
+  }
+
+  private matchesVerificationCode(value: string, stored: string): boolean {
+    // Existing short-lived challenges remain valid during a rolling deployment.
+    const b = Buffer.from(stored);
+    const candidates = [this.hashVerificationCode(value), createHash('sha256').update(value).digest('hex')];
+    return candidates.some((candidate) => { const a = Buffer.from(candidate); return a.length === b.length && timingSafeEqual(a, b); });
   }
 
   private createRawRefreshToken(): string {

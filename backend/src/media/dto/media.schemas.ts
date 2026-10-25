@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-const uploadKindSchema = z.enum(['listing', 'maintenance', 'profile', 'incident']);
-const mediaTypeSchema = z.enum(['IMAGE', 'VIDEO']);
+const uploadKindSchema = z.enum(['listing', 'maintenance', 'profile', 'incident', 'agreement', 'move_in', 'guarantor']);
+const mediaTypeSchema = z.enum(['IMAGE', 'VIDEO', 'DOCUMENT']);
 
 export const createPresignedUploadSchema = z.object({
   kind: uploadKindSchema,
@@ -9,6 +9,7 @@ export const createPresignedUploadSchema = z.object({
   mimeType: z.string().trim().min(3).max(100),
   size: z.number().int().positive().max(50 * 1024 * 1024),
   listingId: z.string().uuid().optional(),
+  tenancyId: z.string().uuid().optional(),
 });
 
 export const deleteUploadSchema = z.object({

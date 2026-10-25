@@ -22,7 +22,7 @@ export function PropertyAssistantPage() {
           <Sparkles size={18} />
           <span>
             <strong>Sign in to ask property questions</strong>
-            <small>Ask questions about a home and message its landlord after you sign in. KYC is not required.</small>
+            <small>Ask the Property Assistant questions about a home after you sign in. KYC is not required.</small>
           </span>
           <Button onClick={() => go("sign-in")}>Sign in <ArrowRight size={14} /></Button>
         </section>

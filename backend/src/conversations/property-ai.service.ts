@@ -47,14 +47,21 @@ export class PropertyAiService {
    * on the listing. Any other question is handed to the property contact by
    * ConversationsService, rather than being sent to an external AI provider.
    */
-  async answer(listingId: string, question: string): Promise<PropertyAssistantReply> {
-    const listing = await this.listingsService.getByPublicId(listingId);
+  async answer(listingId: string, question: string, userId?: string): Promise<PropertyAssistantReply> {
+    const listing = await this.listingsService.getByPublicId(listingId, userId);
     const normalized = question.toLowerCase().replace(/\s+/g, ' ').trim();
     const answer = (body: string): PropertyAssistantReply => ({ body, needsPropertyContactReply: false });
     const handoff = (): PropertyAssistantReply => ({
       body: 'That detail is not included in this listing, so I will send your question to the property contact.',
       needsPropertyContactReply: true,
     });
+
+    // A keyword match cannot reliably answer a multi-part or conditional
+    // question. Escalate rather than presenting a related fact as an answer.
+    if (/^(can|could|would|will|do|does|is|are|has|have|may)\b/.test(normalized) ||
+        (normalized.match(/\?/g) ?? []).length > 1 ||
+        /\b(negotiable|negotiate|discount|refund|refundable|permission|allowed|allow|guarantee|except|unless|condition|how much extra)\b/.test(normalized) ||
+        /\b(and|also|but)\b/.test(normalized)) return handoff();
 
     if (/^(hi|hello|hey|good (morning|afternoon|evening))\b/.test(normalized)) {
       return answer('Hello. I can help with the price, fees, location, availability, lease length, amenities, house rules, and home details shown in this listing.');

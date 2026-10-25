@@ -1,8 +1,11 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
-import { CautionStatus, EscrowStatus, LedgerAccountCode, LedgerEntryType, PayoutKind, PayoutStatus, Prisma } from '@prisma/client';
+import { ModuleRef } from '@nestjs/core';
+import { CautionStatus, EscrowStatus, LedgerAccountCode, LedgerEntryType, NotificationType, PayoutKind, PayoutStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../common/database/prisma.service';
 import { PaystackService } from '../integrations/paystack.service';
 import { LedgerService } from './ledger.service';
+import { ReceiptsService } from '../documents/receipts.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class PayoutExecutionService {
@@ -12,6 +15,8 @@ export class PayoutExecutionService {
     private readonly prisma: PrismaService,
     private readonly paystack: PaystackService,
     private readonly ledger: LedgerService,
+    private readonly receiptsService: ReceiptsService,
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   async execute(payoutId: string): Promise<void> {
@@ -71,16 +76,20 @@ export class PayoutExecutionService {
   }
 
   async markProviderResult(providerReference: string, successful: boolean, failureReason?: string): Promise<void> {
-    await this.prisma.$transaction(async (transaction) => {
+    const completed = await this.prisma.$transaction(async (transaction) => {
       const payout = await transaction.payout.findUnique({ where: { providerReference }, include: { payment: true } });
       if (!payout || this.isTerminal(payout.status)) {
         return;
       }
       if (!successful) {
-        await transaction.payout.update({ where: { id: payout.id }, data: { status: PayoutStatus.FAILED, failureReason } });
+        await transaction.payout.updateMany({ where: { id: payout.id, status: payout.status }, data: { status: PayoutStatus.FAILED, failureReason } });
         return;
       }
-      await transaction.payout.update({ where: { id: payout.id }, data: { status: PayoutStatus.PAID, paidAt: new Date() } });
+      const paidAt = new Date();
+      // Provider callbacks can be repeated or arrive concurrently. Only the
+      // transaction that changes the state may record and announce payment.
+      const claimed = await transaction.payout.updateMany({ where: { id: payout.id, status: payout.status }, data: { status: PayoutStatus.PAID, paidAt } });
+      if (claimed.count !== 1) return;
       const debitAccount = payout.kind === PayoutKind.LANDLORD || payout.kind === PayoutKind.CAUTION_DEDUCTION
         ? LedgerAccountCode.LANDLORD_PAYABLE
         : payout.kind === PayoutKind.AGENT
@@ -96,7 +105,28 @@ export class PayoutExecutionService {
         metadata: { payoutId: payout.id },
       });
       await this.updateEscrowSettlement(transaction, payout.paymentId);
+      // A proof of payment is created only from a provider-confirmed payout
+      // result; the service performs a compound-key upsert for landlord and
+      // agent disbursements.
+      await this.receiptsService.issuePayoutProofOfPayment(transaction, { ...payout, paidAt });
+      return { userId: payout.recipientUserId, payoutId: payout.id, paymentId: payout.paymentId, kind: payout.kind };
     });
+    if (completed) {
+      const refund = completed.kind === PayoutKind.REFUND || completed.kind === PayoutKind.CAUTION_REFUND;
+      try {
+        const notifications = this.moduleRef.get(NotificationsService, { strict: false });
+        await notifications.create({
+          userId: completed.userId,
+          type: NotificationType.ESCROW_UPDATED,
+          title: refund ? 'Refund sent' : 'Payout sent — proof of payment ready',
+          body: refund ? 'Your refund has been confirmed by the payment provider.' : 'Your payout has been confirmed by the payment provider. Open Transactions to download your proof of payment.',
+          data: { paymentId: completed.paymentId, payoutId: completed.payoutId },
+        });
+      } catch {
+        // Notification infrastructure must never undo a confirmed transfer.
+        this.logger.warn(`Could not create payout notification for ${completed.payoutId}`);
+      }
+    }
   }
 
   private async updateEscrowSettlement(transaction: Prisma.TransactionClient, paymentId: string): Promise<void> {
@@ -106,6 +136,10 @@ export class PayoutExecutionService {
       where: { paymentId, status: PayoutStatus.PAID },
       select: { kind: true, amountKobo: true },
     });
+    const cancellationRetentions = await transaction.ledgerEntry.findMany({
+      where: { paymentId, entryType: LedgerEntryType.CANCELLATION_FEE_ALLOCATED },
+      select: { debitAccount: true, amountKobo: true },
+    });
     const sum = (kind: PayoutKind) => payouts
       .filter((payout) => payout.kind === kind)
       .reduce((total, payout) => total + payout.amountKobo, 0n);
@@ -113,6 +147,12 @@ export class PayoutExecutionService {
     const rentRefunded = sum(PayoutKind.REFUND);
     const cautionPaidToLandlord = sum(PayoutKind.CAUTION_DEDUCTION);
     const cautionRefunded = sum(PayoutKind.CAUTION_REFUND);
+    const rentRetainedForCancellation = cancellationRetentions
+      .filter((entry) => entry.debitAccount === LedgerAccountCode.RENT_ESCROW)
+      .reduce((total, entry) => total + entry.amountKobo, 0n);
+    const cautionRetainedForCancellation = cancellationRetentions
+      .filter((entry) => entry.debitAccount === LedgerAccountCode.CAUTION_ESCROW)
+      .reduce((total, entry) => total + entry.amountKobo, 0n);
     const openRentPayouts = await transaction.payout.count({
       where: {
         paymentId,
@@ -120,10 +160,10 @@ export class PayoutExecutionService {
         status: { notIn: [PayoutStatus.PAID, PayoutStatus.FAILED, PayoutStatus.CANCELLED] },
       },
     });
-    const rentSettled = (rentPaidToLandlord >= escrow.rentHeldKobo || rentRefunded >= escrow.rentHeldKobo)
+    const rentSettled = (rentPaidToLandlord + rentRefunded + rentRetainedForCancellation >= escrow.rentHeldKobo)
       && openRentPayouts === 0;
     const cautionSettled = escrow.cautionHeldKobo === 0n
-      || cautionPaidToLandlord + cautionRefunded >= escrow.cautionHeldKobo;
+      || cautionPaidToLandlord + cautionRefunded + cautionRetainedForCancellation >= escrow.cautionHeldKobo;
     const finalised = rentSettled && cautionSettled;
     const fullyRefunded = rentRefunded >= escrow.rentHeldKobo
       && cautionRefunded >= escrow.cautionHeldKobo;

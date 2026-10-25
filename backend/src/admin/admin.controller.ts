@@ -39,6 +39,8 @@ import {
   moderateListingSchema,
   ReviewKycRequest,
   reviewKycSchema,
+  ReviewPublisherVerificationRequest,
+  reviewPublisherVerificationSchema,
   UpdatePermissionsRequest,
   updatePermissionsSchema,
   UpdateUserStatusRequest,
@@ -46,6 +48,12 @@ import {
 } from "./dto/admin.schemas";
 import { AdminService } from "./admin.service";
 import { PaymentsService } from '../payments/payments.service';
+import { z } from 'zod';
+
+const moveInRefundDecision = z.object({
+  reason: z.string().trim().min(3).max(4000),
+  outcome: z.enum(['VALID_PROPERTY_FAILURE', 'TENANT_CHANGED_MIND']),
+}).strict();
 
 @ApiTags("Administration")
 @ApiBearerAuth()
@@ -153,6 +161,10 @@ export class AdminController {
     return this.adminService.systemStates();
   }
 
+  @Roles(RoleCode.SUPER_ADMIN)
+  @Get('notification-activity')
+  notificationActivity() { return this.adminService.notificationActivity(); }
+
   @Post('transactions/:paymentId/refunds')
   @RequirePermissions(PermissionKey.REFUNDS_PROCESS)
   refund(
@@ -161,6 +173,12 @@ export class AdminController {
     @Body(new ZodValidationPipe(adminRefundSchema)) input: AdminRefundRequest,
   ) {
     return this.paymentsService.issueRefund(user.userId, paymentId, input);
+  }
+
+  @Post('transactions/:paymentId/move-in-refunds/:requestId/approve')
+  @RequirePermissions(PermissionKey.REFUNDS_PROCESS)
+  approveMoveInRefund(@CurrentUser() user: AuthenticatedUser, @Param('paymentId') paymentId: string, @Param('requestId') requestId: string, @Body(new ZodValidationPipe(moveInRefundDecision)) input: z.infer<typeof moveInRefundDecision>) {
+    return this.paymentsService.approveMoveInRefund(user.userId, paymentId, requestId, input.reason, input.outcome);
   }
 
   @Post('transactions/:paymentId/release')
@@ -191,6 +209,16 @@ export class AdminController {
     @Body(new ZodValidationPipe(reviewKycSchema)) input: ReviewKycRequest,
   ) {
     return this.adminService.reviewKyc(user.userId, userId, input);
+  }
+
+  @Post('publisher-verifications/:userId/review')
+  @RequirePermissions(PermissionKey.KYC_REVIEW)
+  reviewPublisherVerification(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId') userId: string,
+    @Body(new ZodValidationPipe(reviewPublisherVerificationSchema)) input: ReviewPublisherVerificationRequest,
+  ) {
+    return this.adminService.reviewPublisherVerification(user.userId, userId, input);
   }
 
   @Post("listings/:listingId/approve")

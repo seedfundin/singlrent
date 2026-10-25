@@ -36,6 +36,26 @@ export class ListingsController {
     return this.listingsService.saved(user.userId, query);
   }
 
+  @ApiBearerAuth()
+  @Get(':idOrSlug/saved-state')
+  savedState(@CurrentUser() user: AuthenticatedUser, @Param('idOrSlug') idOrSlug: string) {
+    return this.listingsService.savedState(user.userId, idOrSlug);
+  }
+
+  // Once a payment reserves a property it is no longer public, but the tenant
+  // progressing through move-in and the listing manager still need to see it.
+  @ApiBearerAuth()
+  @Get(':idOrSlug/access/pricing')
+  accessiblePricing(@CurrentUser() user: AuthenticatedUser, @Param('idOrSlug') idOrSlug: string) {
+    return this.listingsService.publicPricing(idOrSlug, user.userId);
+  }
+
+  @ApiBearerAuth()
+  @Get(':idOrSlug/access')
+  accessibleDetail(@CurrentUser() user: AuthenticatedUser, @Param('idOrSlug') idOrSlug: string) {
+    return this.listingsService.getByPublicId(idOrSlug, user.userId);
+  }
+
   @Public()
   @Get(':idOrSlug/pricing')
   pricing(@Param('idOrSlug') idOrSlug: string) {

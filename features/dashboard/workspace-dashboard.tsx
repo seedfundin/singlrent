@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAppSession } from "@/features/app/app-provider";
+import { InspectionDashboard } from "@/features/inspections/inspections";
 import { Metric, Shell, Status, type Navigate } from "@/features/app/shell";
 import { api, type ApiApplicationStatus, type ApiDashboard, type ApiListing, type ApiRentalApplication } from "@/lib/api";
 import { formatNaira } from "@/lib/pricing";
@@ -177,6 +178,7 @@ export function WorkspaceDashboard({ go, role }: { go: Navigate; role: Workspace
         </section>
         <DashboardSecondary unreadMessages={unreadMessages} unreadNotifications={unreadNotifications} maintenanceOpen={managerMetrics.maintenanceOpen} onOpenMessages={openMessages} onOpenMaintenance={() => go(homeView)} onOpenTransactions={openTransactions} />
       </> : <section className="rental-empty"><CircleAlert size={24} /><h1>No dashboard data is available</h1><p>Try refreshing this page.</p></section>}
+      <InspectionDashboard token={session.accessToken} userId={session.user.id} manager={role !== 'tenant'} />
     </div>
   </Shell>;
 }

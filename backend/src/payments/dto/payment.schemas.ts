@@ -1,13 +1,26 @@
 import { z } from 'zod';
 import { paginationQuerySchema } from '../../common/http/pagination';
+import { identityVerificationMethodSchema } from '../../users/dto/user.schemas';
 
 export const paymentQuerySchema = paginationQuerySchema;
 export const paymentInitializationSchema = z.object({
   applicationId: z.string().uuid(),
+  cancellationPolicyAccepted: z.literal(true, {
+    errorMap: () => ({ message: 'Accept the cancellation and refund policy before payment.' }),
+  }),
 });
 export const payoutWithdrawSchema = z.object({
   // Required only when the recipient has not already completed one-time KYC.
-  nin: z.string().regex(/^\d{11}$/, 'NIN must contain 11 digits').optional(),
+  method: identityVerificationMethodSchema.optional(),
+  identifier: z.string().regex(/^\d{11}$/, 'NIN or BVN must contain 11 digits').optional(),
+}).superRefine((value, context) => {
+  if (Boolean(value.method) !== Boolean(value.identifier)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Provide both an identity method and its 11-digit number.',
+      path: value.method ? ['identifier'] : ['method'],
+    });
+  }
 });
 export const paystackWebhookSchema = z.object({
   event: z.string().min(1).max(120),

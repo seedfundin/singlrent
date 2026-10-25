@@ -63,6 +63,16 @@ enum KycStatus {
   REJECTED
 }
 
+// A Dojah record must identify the same person named on the SingleRent
+// account. Raw provider names are not retained; this records only the outcome
+// of the comparison so an exception can be reviewed safely.
+enum IdentityNameMatchStatus {
+  NOT_CHECKED
+  MATCHED
+  MISMATCHED
+  UNAVAILABLE
+}
+
 // This is separate from a tenant's transactional KYC. It is the one-time
 // verification an account must complete before it can publish a property.
 enum PublisherVerificationMethod {
@@ -73,6 +83,7 @@ enum PublisherVerificationMethod {
 enum PublisherVerificationStatus {
   NOT_STARTED
   PENDING
+  UNDER_REVIEW
   VERIFIED
   REJECTED
   FAILED
@@ -104,6 +115,61 @@ enum ListingAvailability {
   AVAILABLE
   RENTED
   UNAVAILABLE
+}
+
+enum InspectionStatus {
+  PENDING
+  CONFIRMED
+  DECLINED
+  CANCELLED
+  COMPLETED
+  EXPIRED
+}
+
+enum InspectionMode {
+  WEEKLY
+  SPECIFIC_DATES
+  BY_REQUEST
+}
+
+model InspectionAvailability {
+  id                  String         @id @default(uuid()) @db.Uuid
+  listingId           String         @unique @db.Uuid
+  mode                InspectionMode @default(BY_REQUEST)
+  timezone            String         @default("Africa/Lagos") @db.VarChar(100)
+  durationMinutes     Int            @default(30)
+  automaticConfirmation Boolean      @default(false)
+  windows             Json
+  updatedAt           DateTime       @updatedAt
+
+  @@map("inspection_availability")
+}
+
+model InspectionBooking {
+  id              String           @id @default(uuid()) @db.Uuid
+  listingId       String           @db.Uuid
+  tenantId        String           @db.Uuid
+  hostId          String           @db.Uuid
+  landlordId      String?          @db.Uuid
+  agentId         String?          @db.Uuid
+  hostCompletedAt DateTime?
+  tenantConfirmedAt DateTime?
+  tenantDisputedAt DateTime?
+  reviews         Review[]
+  startsAt        DateTime
+  endsAt          DateTime
+  status          InspectionStatus @default(PENDING)
+  requestedById   String           @db.Uuid
+  proposedStartsAt DateTime?
+  proposedEndsAt   DateTime?
+  proposedById     String?         @db.Uuid
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([hostId, status, startsAt])
+  @@index([listingId, status, startsAt])
+  @@index([tenantId, createdAt])
+  @@map("inspection_bookings")
 }
 
 enum ListingSource {
@@ -141,6 +207,16 @@ enum TenancyStatus {
   ACTIVE
   ENDED
   CANCELLED
+}
+
+enum GuarantorFormStatus {
+  PENDING_SIGNATURE
+  EXECUTED
+}
+
+enum GuarantorSignatureMethod {
+  ELECTRONIC_CONSENT
+  UPLOADED_SIGNED_COPY
 }
 
 enum PaymentProvider {
@@ -203,6 +279,7 @@ enum LedgerAccountCode {
   RENT_ESCROW
   CAUTION_ESCROW
   PLATFORM_REVENUE
+  LEGAL_FEE_REVENUE
   AGENT_PAYABLE
   LANDLORD_PAYABLE
   TENANT_REFUND_PAYABLE
@@ -213,6 +290,7 @@ enum LedgerEntryType {
   RENT_ESCROW_HELD
   CAUTION_ESCROW_HELD
   PLATFORM_FEE_ALLOCATED
+  LEGAL_FEE_ALLOCATED
   AGENT_COMMISSION_ALLOCATED
   LANDLORD_PAYOUT_ALLOCATED
   CAUTION_REFUND_ALLOCATED
@@ -220,6 +298,10 @@ enum LedgerEntryType {
   PAYOUT_COMPLETED
   PAYMENT_REVERSED
   REFUND_ISSUED
+  CANCELLATION_FEE_ALLOCATED
+  PLATFORM_FEE_REFUNDED
+  LEGAL_FEE_REFUNDED
+  AGENT_FEE_REFUNDED
   KYC_SERVICE_FEE_ALLOCATED
 }
 
@@ -261,6 +343,11 @@ enum MessageKind {
 }
 
 enum NotificationType {
+  INSPECTION_UPDATED
+  REVIEW_UPDATED
+  VERIFICATION_UPDATED
+  TENANCY_UPDATED
+  ADMIN_ANNOUNCEMENT
   NEW_MESSAGE
   NEW_APPLICATION
   APPLICATION_APPROVED
@@ -313,6 +400,7 @@ enum ReviewTargetType {
   LISTING
   LANDLORD
   AGENT
+  TENANT
 }
 
 enum ReviewStatus {
@@ -321,142 +409,210 @@ enum ReviewStatus {
   REMOVED
 }
 
+enum AgreementStatus {
+  PENDING_SIGNATURES
+  PARTIALLY_SIGNED
+  EXECUTED
+  SUPERSEDED
+  VOID
+}
+
+enum AgreementSignerRole {
+  TENANT
+  LANDLORD
+  AGENT
+}
+
+enum AgreementSignatureMethod {
+  ELECTRONIC_CONSENT
+  UPLOADED_SIGNED_COPY
+}
+
+enum ReceiptKind {
+  TENANT_PAYMENT_CONFIRMED
+  LANDLORD_PAYOUT_DISBURSED
+}
+
 model User {
-  id                      String                     @id @default(uuid()) @db.Uuid
-  email                   String                     @unique @db.VarChar(320)
-  firstName               String                     @db.VarChar(100)
-  lastName                String                     @db.VarChar(100)
-  passwordHash            String?                    @db.VarChar(255)
-  phone                   String?                    @unique @db.VarChar(32)
-  phoneVerifiedAt         DateTime?
-  emailVerifiedAt         DateTime?
-  profileImageUrl         String?                    @db.Text
-  profileImagePublicId    String?                    @db.VarChar(255)
-  bio                     String?                    @db.VarChar(1000)
-  status                  UserStatus                 @default(ACTIVE)
-  lastActiveAt            DateTime?
-  createdAt               DateTime                   @default(now())
-  updatedAt               DateTime                   @updatedAt
-  kyc                     KycProfile?
-  publisherVerification   PublisherVerification?
-  tenantProfile           TenantProfile?
-  landlordProfile         LandlordProfile?
-  agentProfile            AgentProfile?
-  payoutAccount           PayoutAccount?
-  userRoles               UserRole[]
-  directPermissions       UserPermission[]
-  refreshTokens           RefreshToken[]
-  emailChallenges         EmailVerificationChallenge[]
-  phoneChallenges         PhoneVerificationChallenge[]
+  id                         String                       @id @default(uuid()) @db.Uuid
+  email                      String                       @unique @db.VarChar(320)
+  firstName                  String                       @db.VarChar(100)
+  lastName                   String                       @db.VarChar(100)
+  passwordHash               String?                      @db.VarChar(255)
+  phone                      String?                      @unique @db.VarChar(32)
+  phoneVerifiedAt            DateTime?
+  emailVerifiedAt            DateTime?
+  profileImageUrl            String?                      @db.Text
+  profileImagePublicId       String?                      @db.VarChar(255)
+  bio                        String?                      @db.VarChar(1000)
+  status                     UserStatus                   @default(ACTIVE)
+  lastActiveAt               DateTime?
+  createdAt                  DateTime                     @default(now())
+  updatedAt                  DateTime                     @updatedAt
+  kyc                        KycProfile?
+  publisherVerification      PublisherVerification?
+  publisherVerificationAttempts PublisherVerificationAttempt[]
+  tenantProfile              TenantProfile?
+  landlordProfile            LandlordProfile?
+  agentProfile               AgentProfile?
+  payoutAccount              PayoutAccount?
+  userRoles                  UserRole[]
+  directPermissions          UserPermission[]
+  refreshTokens              RefreshToken[]
+  emailChallenges            EmailVerificationChallenge[]
+  passwordResetChallenges    PasswordResetChallenge[]
+  phoneChallenges            PhoneVerificationChallenge[]
   verificationServiceCharges VerificationServiceCharge[]
-  savedListings           SavedListing[]
-  listingsOwned           Listing[]                  @relation("ListingLandlord")
-  listingsCreated         Listing[]                  @relation("ListingCreator")
-  listingsManaged         Listing[]                  @relation("ListingAgent")
-  applicationsAsTenant    RentalApplication[]        @relation("ApplicationTenant")
-  applicationsAsLandlord  RentalApplication[]        @relation("ApplicationLandlord")
-  applicationsAsAgent     RentalApplication[]        @relation("ApplicationAgent")
-  tenanciesAsTenant       Tenancy[]                  @relation("TenancyTenant")
-  tenanciesAsLandlord     Tenancy[]                  @relation("TenancyLandlord")
-  tenanciesAsAgent        Tenancy[]                  @relation("TenancyAgent")
-  paymentsAsTenant        Payment[]                  @relation("PaymentTenant")
-  paymentsAsLandlord      Payment[]                  @relation("PaymentLandlord")
-  paymentsAsAgent         Payment[]                  @relation("PaymentAgent")
-  payoutRecipients        Payout[]                   @relation("PayoutRecipient")
-  maintenanceReported     MaintenanceRequest[]       @relation("MaintenanceReporter")
-  maintenanceForLandlord  MaintenanceRequest[]       @relation("MaintenanceLandlord")
-  maintenanceForAgent     MaintenanceRequest[]       @relation("MaintenanceAgent")
-  maintenanceAssigned     MaintenanceRequest[]       @relation("MaintenanceAssignee")
-  maintenanceUpdates      MaintenanceUpdate[]
-  conversationMemberships ConversationMember[]
-  messagesSent            Message[]                  @relation("MessageSender")
-  messageReceipts         MessageReceipt[]
-  notifications           Notification[]
-  notificationPreferences NotificationPreference[]
-  reviewsWritten          Review[]                   @relation("ReviewAuthor")
-  reviewsReceived         Review[]                   @relation("ReviewTargetUser")
-  incidentsReported       IncidentReport[]           @relation("IncidentReporter")
-  incidentsAssigned       IncidentReport[]           @relation("IncidentAssignee")
-  auditLogs               AuditLog[]                 @relation("AuditLogActor")
-  invitationsSent         AdminInvitation[]          @relation("AdminInvitationSender")
-  invitationAccepted      AdminInvitation?           @relation("AdminInvitationAccepted")
+  savedListings              SavedListing[]
+  listingsOwned              Listing[]                    @relation("ListingLandlord")
+  listingsCreated            Listing[]                    @relation("ListingCreator")
+  listingsManaged            Listing[]                    @relation("ListingAgent")
+  applicationsAsTenant       RentalApplication[]          @relation("ApplicationTenant")
+  applicationsAsLandlord     RentalApplication[]          @relation("ApplicationLandlord")
+  applicationsAsAgent        RentalApplication[]          @relation("ApplicationAgent")
+  tenanciesAsTenant          Tenancy[]                    @relation("TenancyTenant")
+  tenanciesAsLandlord        Tenancy[]                    @relation("TenancyLandlord")
+  tenanciesAsAgent           Tenancy[]                    @relation("TenancyAgent")
+  paymentsAsTenant           Payment[]                    @relation("PaymentTenant")
+  paymentsAsLandlord         Payment[]                    @relation("PaymentLandlord")
+  paymentsAsAgent            Payment[]                    @relation("PaymentAgent")
+  payoutRecipients           Payout[]                     @relation("PayoutRecipient")
+  maintenanceReported        MaintenanceRequest[]         @relation("MaintenanceReporter")
+  maintenanceForLandlord     MaintenanceRequest[]         @relation("MaintenanceLandlord")
+  maintenanceForAgent        MaintenanceRequest[]         @relation("MaintenanceAgent")
+  maintenanceAssigned        MaintenanceRequest[]         @relation("MaintenanceAssignee")
+  maintenanceUpdates         MaintenanceUpdate[]
+  conversationMemberships    ConversationMember[]
+  messagesSent               Message[]                    @relation("MessageSender")
+  questionsAsTenant          PropertyQuestionEscalation[] @relation("QuestionTenant")
+  questionsAsContact         PropertyQuestionEscalation[] @relation("QuestionContact")
+  messageReceipts            MessageReceipt[]
+  notifications              Notification[]
+  notificationPreferences    NotificationPreference[]
+  pushDevices                PushDevice[]
+  reviewsWritten             Review[]                     @relation("ReviewAuthor")
+  reviewsReceived            Review[]                     @relation("ReviewTargetUser")
+  agreementSignatures        AgreementSignature[]
+  guarantorFormsSubmitted    GuarantorForm[]              @relation("GuarantorFormSubmittedBy")
+  receipts                   Receipt[]                    @relation("ReceiptRecipient")
+  incidentsReported          IncidentReport[]             @relation("IncidentReporter")
+  incidentsAssigned          IncidentReport[]             @relation("IncidentAssignee")
+  auditLogs                  AuditLog[]                   @relation("AuditLogActor")
+  invitationsSent            AdminInvitation[]            @relation("AdminInvitationSender")
+  invitationAccepted         AdminInvitation?             @relation("AdminInvitationAccepted")
 
   @@map("users")
 }
 
 model KycProfile {
-  id                    String    @id @default(uuid()) @db.Uuid
-  userId                String    @unique @db.Uuid
-  ninCiphertext         String?   @db.Text
-  ninLast4              String?   @db.Char(4)
-  ninStatus             KycStatus @default(NOT_STARTED)
-  phoneStatus           KycStatus @default(NOT_STARTED)
-  status                KycStatus @default(NOT_STARTED)
-  providerReference     String?   @unique @db.VarChar(255)
-  rejectionReason       String?   @db.VarChar(1000)
-  reviewedByUserId      String?   @db.Uuid
-  reviewedAt            DateTime?
-  submittedAt           DateTime?
-  verifiedAt            DateTime?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
-  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @unique @db.Uuid
+  ninCiphertext     String?   @db.Text
+  ninLast4          String?   @db.Char(4)
+  identityMethod    PublisherVerificationMethod?
+  ninStatus         KycStatus @default(NOT_STARTED)
+  phoneStatus       KycStatus @default(NOT_STARTED)
+  status            KycStatus @default(NOT_STARTED)
+  nameMatchStatus   IdentityNameMatchStatus @default(NOT_CHECKED)
+  nameMatchReason   String?   @db.VarChar(1000)
+  providerReference String?   @unique @db.VarChar(255)
+  rejectionReason   String?   @db.VarChar(1000)
+  reviewedByUserId  String?   @db.Uuid
+  reviewedAt        DateTime?
+  submittedAt       DateTime?
+  verifiedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([status, submittedAt])
   @@map("kyc_profiles")
 }
 
 model PublisherVerification {
-  id                       String                      @id @default(uuid()) @db.Uuid
-  userId                   String                      @unique @db.Uuid
+  id                       String                       @id @default(uuid()) @db.Uuid
+  userId                   String                       @unique @db.Uuid
   method                   PublisherVerificationMethod?
-  status                   PublisherVerificationStatus @default(NOT_STARTED)
-  providerReference        String?                     @unique @db.VarChar(255)
-  providerVerificationType String?                     @db.VarChar(100)
-  providerStatus           String?                     @db.VarChar(100)
-  livenessVerified         Boolean                     @default(false)
-  failureReason            String?                     @db.VarChar(1000)
+  status                   PublisherVerificationStatus  @default(NOT_STARTED)
+  providerReference        String?                      @unique @db.VarChar(255)
+  providerVerificationType String?                      @db.VarChar(100)
+  providerStatus           String?                      @db.VarChar(100)
+  livenessVerified         Boolean                      @default(false)
+  nameMatchStatus          IdentityNameMatchStatus     @default(NOT_CHECKED)
+  nameMatchReason          String?                     @db.VarChar(1000)
+  failureReason            String?                      @db.VarChar(1000)
   requestedAt              DateTime?
   completedAt              DateTime?
   verifiedAt               DateTime?
-  createdAt                DateTime                    @default(now())
-  updatedAt                DateTime                    @updatedAt
-  user                     User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt                DateTime                     @default(now())
+  updatedAt                DateTime                     @updatedAt
+  user                     User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attempts                 PublisherVerificationAttempt[]
 
   @@index([status, requestedAt])
   @@map("publisher_verifications")
 }
 
+// A current verification record drives account access. Attempts preserve every
+// provider reference for reconciliation and ensure a delayed webhook for an
+// older, billable session cannot overwrite the current result.
+model PublisherVerificationAttempt {
+  id                       String                      @id @default(uuid()) @db.Uuid
+  verificationId           String                      @db.Uuid
+  userId                   String                      @db.Uuid
+  method                   PublisherVerificationMethod
+  status                   PublisherVerificationStatus @default(PENDING)
+  providerReference        String                      @unique @db.VarChar(255)
+  providerVerificationType String?                     @db.VarChar(100)
+  providerStatus           String?                     @db.VarChar(100)
+  livenessVerified         Boolean                     @default(false)
+  nameMatchStatus          IdentityNameMatchStatus    @default(NOT_CHECKED)
+  nameMatchReason          String?                    @db.VarChar(1000)
+  failureReason            String?                     @db.VarChar(1000)
+  requestedAt              DateTime                    @default(now())
+  completedAt              DateTime?
+  verifiedAt               DateTime?
+  createdAt                DateTime                    @default(now())
+  updatedAt                DateTime                    @updatedAt
+  verification             PublisherVerification       @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+  user                     User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, requestedAt])
+  @@index([verificationId, requestedAt])
+  @@map("publisher_verification_attempts")
+}
+
 model TenantProfile {
-  userId             String   @id @db.Uuid
-  occupation         String?  @db.VarChar(150)
-  defaultOccupants   Int      @default(1)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId           String   @id @db.Uuid
+  occupation       String?  @db.VarChar(150)
+  defaultOccupants Int      @default(1)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("tenant_profiles")
 }
 
 model LandlordProfile {
-  userId           String   @id @db.Uuid
-  businessName     String?  @db.VarChar(200)
-  payoutRecipientCode String? @db.VarChar(255)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId              String   @id @db.Uuid
+  businessName        String?  @db.VarChar(200)
+  payoutRecipientCode String?  @db.VarChar(255)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("landlord_profiles")
 }
 
 model AgentProfile {
-  userId           String   @id @db.Uuid
-  companyName      String?  @db.VarChar(200)
-  licenceNumber    String?  @unique @db.VarChar(100)
-  payoutRecipientCode String? @db.VarChar(255)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId              String    @id @db.Uuid
+  companyName         String?   @db.VarChar(200)
+  licenceNumber       String?   @unique @db.VarChar(100)
+  dateOfBirth         DateTime? @db.Date
+  payoutRecipientCode String?   @db.VarChar(255)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("agent_profiles")
 }
@@ -468,7 +624,10 @@ model PayoutAccount {
   id            String          @id @default(uuid()) @db.Uuid
   userId        String          @unique @db.Uuid
   provider      PaymentProvider @default(PAYSTACK)
-  recipientCode String          @unique @db.VarChar(255)
+  // A bank destination may legitimately be shared by more than one user
+  // (for example, a joint household or a test account). The user relation is
+  // still unique, while the provider recipient code is indexed for transfers.
+  recipientCode String          @db.VarChar(255)
   bankCode      String          @db.VarChar(32)
   bankName      String          @db.VarChar(180)
   accountName   String          @db.VarChar(255)
@@ -483,33 +642,50 @@ model PayoutAccount {
 }
 
 model PhoneVerificationChallenge {
-  id          String   @id @default(uuid()) @db.Uuid
-  userId      String   @db.Uuid
-  phone       String   @db.VarChar(32)
-  codeHash    String   @db.Char(64)
-  expiresAt   DateTime
-  consumedAt  DateTime?
-  attempts    Int      @default(0)
-  createdAt   DateTime @default(now())
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  phone      String    @db.VarChar(32)
+  codeHash   String    @db.Char(64)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, expiresAt])
   @@map("phone_verification_challenges")
 }
 
 model EmailVerificationChallenge {
-  id          String   @id @default(uuid()) @db.Uuid
-  userId      String   @db.Uuid
-  email       String   @db.VarChar(320)
-  codeHash    String   @db.Char(64)
-  expiresAt   DateTime
-  consumedAt  DateTime?
-  attempts    Int      @default(0)
-  createdAt   DateTime @default(now())
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  email      String    @db.VarChar(320)
+  codeHash   String    @db.Char(64)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, expiresAt])
   @@map("email_verification_challenges")
+}
+
+// Reset OTPs are distinct from email-verification OTPs. A password reset must
+// never silently verify an email address or invalidate its verification state.
+model PasswordResetChallenge {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  codeHash    String    @db.Char(64)
+  attempts    Int       @default(0)
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  requestedIp String?   @db.VarChar(64)
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("password_reset_challenges")
 }
 
 model Role {
@@ -579,16 +755,16 @@ model UserPermission {
 }
 
 model RefreshToken {
-  id         String    @id @default(uuid()) @db.Uuid
-  userId     String    @db.Uuid
-  tokenHash  String    @unique @db.Char(64)
-  familyId   String    @db.Uuid
-  expiresAt  DateTime
-  revokedAt  DateTime?
-  createdAt  DateTime  @default(now())
-  userAgent  String?   @db.VarChar(500)
-  ipAddress  String?   @db.VarChar(64)
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique @db.Char(64)
+  familyId  String    @db.Uuid
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  userAgent String?   @db.VarChar(500)
+  ipAddress String?   @db.VarChar(64)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, familyId])
   @@index([expiresAt])
@@ -596,49 +772,49 @@ model RefreshToken {
 }
 
 model Listing {
-  id                    String              @id @default(uuid()) @db.Uuid
-  slug                  String              @unique @db.VarChar(180)
-  title                 String              @db.VarChar(200)
-  description           String              @db.Text
-  propertyType          PropertyType
-  source                ListingSource       @default(LANDLORD)
-  status                ListingStatus       @default(DRAFT)
-  availability          ListingAvailability @default(AVAILABLE)
-  annualRentKobo        BigInt
-  serviceChargeKobo     BigInt              @default(0)
-  cautionFeeKobo        BigInt              @default(0)
-  bedrooms              Int
-  bathrooms             Int
-  state                 String              @db.VarChar(100)
-  area                  String              @db.VarChar(150)
-  address               String              @db.VarChar(500)
-  latitude              Decimal?            @db.Decimal(10, 7)
-  longitude             Decimal?            @db.Decimal(10, 7)
-  amenities             String[]
-  rules                 Json?
-  availableFrom         DateTime?
-  minimumLeaseMonths    Int                 @default(12)
-  publishedAt           DateTime?
-  archivedAt            DateTime?
-  moderationNote        String?             @db.VarChar(1000)
-  moderatedByUserId     String?             @db.Uuid
-  landlordId            String              @db.Uuid
-  createdById           String              @db.Uuid
-  managingAgentId       String?             @db.Uuid
-  createdAt             DateTime            @default(now())
-  updatedAt             DateTime            @updatedAt
-  landlord              User                @relation("ListingLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
-  createdBy             User                @relation("ListingCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  managingAgent         User?               @relation("ListingAgent", fields: [managingAgentId], references: [id], onDelete: SetNull)
-  media                 ListingMedia[]
-  savedBy               SavedListing[]
-  applications          RentalApplication[]
-  tenancies             Tenancy[]
-  payments              Payment[]
-  maintenanceRequests   MaintenanceRequest[]
-  conversations         Conversation[]
-  reviews               Review[]
-  incidents             IncidentReport[]
+  id                  String               @id @default(uuid()) @db.Uuid
+  slug                String               @unique @db.VarChar(180)
+  title               String               @db.VarChar(200)
+  description         String               @db.Text
+  propertyType        PropertyType
+  source              ListingSource        @default(LANDLORD)
+  status              ListingStatus        @default(DRAFT)
+  availability        ListingAvailability  @default(AVAILABLE)
+  annualRentKobo      BigInt
+  serviceChargeKobo   BigInt               @default(0)
+  cautionFeeKobo      BigInt               @default(0)
+  bedrooms            Int
+  bathrooms           Int
+  state               String               @db.VarChar(100)
+  area                String               @db.VarChar(150)
+  address             String               @db.VarChar(500)
+  latitude            Decimal?             @db.Decimal(10, 7)
+  longitude           Decimal?             @db.Decimal(10, 7)
+  amenities           String[]
+  rules               Json?
+  availableFrom       DateTime?
+  minimumLeaseMonths  Int                  @default(12)
+  publishedAt         DateTime?
+  archivedAt          DateTime?
+  moderationNote      String?              @db.VarChar(1000)
+  moderatedByUserId   String?              @db.Uuid
+  landlordId          String               @db.Uuid
+  createdById         String               @db.Uuid
+  managingAgentId     String?              @db.Uuid
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  landlord            User                 @relation("ListingLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
+  createdBy           User                 @relation("ListingCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  managingAgent       User?                @relation("ListingAgent", fields: [managingAgentId], references: [id], onDelete: SetNull)
+  media               ListingMedia[]
+  savedBy             SavedListing[]
+  applications        RentalApplication[]
+  tenancies           Tenancy[]
+  payments            Payment[]
+  maintenanceRequests MaintenanceRequest[]
+  conversations       Conversation[]
+  reviews             Review[]
+  incidents           IncidentReport[]
 
   @@index([status, availability, state, area])
   @@index([annualRentKobo])
@@ -648,19 +824,19 @@ model Listing {
 }
 
 model ListingMedia {
-  id          String           @id @default(uuid()) @db.Uuid
-  listingId   String           @db.Uuid
-  url         String           @db.Text
-  objectKey   String           @unique @db.VarChar(500)
-  mediaType   ListingMediaType
-  altText     String?          @db.VarChar(255)
-  mimeType    String           @db.VarChar(100)
-  width       Int?
-  height      Int?
-  bytes       Int?
-  position    Int              @default(0)
-  createdAt   DateTime         @default(now())
-  listing     Listing          @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  id        String           @id @default(uuid()) @db.Uuid
+  listingId String           @db.Uuid
+  url       String           @db.Text
+  objectKey String           @unique @db.VarChar(500)
+  mediaType ListingMediaType
+  altText   String?          @db.VarChar(255)
+  mimeType  String           @db.VarChar(100)
+  width     Int?
+  height    Int?
+  bytes     Int?
+  position  Int              @default(0)
+  createdAt DateTime         @default(now())
+  listing   Listing          @relation(fields: [listingId], references: [id], onDelete: Cascade)
 
   @@index([listingId, position])
   @@index([listingId, mediaType])
@@ -680,27 +856,29 @@ model SavedListing {
 }
 
 model RentalApplication {
-  id                String            @id @default(uuid()) @db.Uuid
-  listingId         String            @db.Uuid
-  tenantId          String            @db.Uuid
-  landlordId        String            @db.Uuid
-  agentId           String?           @db.Uuid
-  moveInDate        DateTime
-  leaseMonths       Int
-  occupation        String?           @db.VarChar(150)
-  occupantsCount    Int               @default(1)
-  messageToLandlord String?           @db.VarChar(2000)
-  status            ApplicationStatus @default(PENDING)
-  decisionReason    String?           @db.VarChar(1000)
-  decidedAt         DateTime?
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
-  listing           Listing           @relation(fields: [listingId], references: [id], onDelete: Restrict)
-  tenant            User              @relation("ApplicationTenant", fields: [tenantId], references: [id], onDelete: Restrict)
-  landlord          User              @relation("ApplicationLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
-  agent             User?             @relation("ApplicationAgent", fields: [agentId], references: [id], onDelete: SetNull)
-  payments          Payment[]
-  tenancy           Tenancy?
+  id                       String            @id @default(uuid()) @db.Uuid
+  listingId                String            @db.Uuid
+  tenantId                 String            @db.Uuid
+  landlordId               String            @db.Uuid
+  agentId                  String?           @db.Uuid
+  moveInDate               DateTime
+  leaseMonths              Int
+  occupation               String?           @db.VarChar(150)
+  occupantsCount           Int               @default(1)
+  messageToLandlord        String?           @db.VarChar(2000)
+  tenantQuestionnaire      Json?
+  questionnaireSubmittedAt DateTime?
+  status                   ApplicationStatus @default(PENDING)
+  decisionReason           String?           @db.VarChar(1000)
+  decidedAt                DateTime?
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
+  listing                  Listing           @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  tenant                   User              @relation("ApplicationTenant", fields: [tenantId], references: [id], onDelete: Restrict)
+  landlord                 User              @relation("ApplicationLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
+  agent                    User?             @relation("ApplicationAgent", fields: [agentId], references: [id], onDelete: SetNull)
+  payments                 Payment[]
+  tenancy                  Tenancy?
 
   @@index([tenantId, status])
   @@index([landlordId, status])
@@ -710,23 +888,27 @@ model RentalApplication {
 }
 
 model Tenancy {
-  id            String        @id @default(uuid()) @db.Uuid
-  applicationId String        @unique @db.Uuid
-  listingId     String        @db.Uuid
-  tenantId      String        @db.Uuid
-  landlordId    String        @db.Uuid
-  agentId       String?       @db.Uuid
-  startsAt      DateTime
-  endsAt        DateTime
-  status        TenancyStatus @default(PENDING_MOVE_IN)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  application   RentalApplication @relation(fields: [applicationId], references: [id], onDelete: Restrict)
-  listing       Listing       @relation(fields: [listingId], references: [id], onDelete: Restrict)
-  tenant        User          @relation("TenancyTenant", fields: [tenantId], references: [id], onDelete: Restrict)
-  landlord      User          @relation("TenancyLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
-  agent         User?         @relation("TenancyAgent", fields: [agentId], references: [id], onDelete: SetNull)
+  id                  String               @id @default(uuid()) @db.Uuid
+  applicationId       String               @unique @db.Uuid
+  listingId           String               @db.Uuid
+  tenantId            String               @db.Uuid
+  landlordId          String               @db.Uuid
+  agentId             String?              @db.Uuid
+  startsAt            DateTime
+  endsAt              DateTime
+  status              TenancyStatus        @default(PENDING_MOVE_IN)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  application         RentalApplication    @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  listing             Listing              @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  tenant              User                 @relation("TenancyTenant", fields: [tenantId], references: [id], onDelete: Restrict)
+  landlord            User                 @relation("TenancyLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
+  agent               User?                @relation("TenancyAgent", fields: [agentId], references: [id], onDelete: SetNull)
   maintenanceRequests MaintenanceRequest[]
+  agreement           TenancyAgreement?
+  guarantorForm       GuarantorForm?
+  reviews             Review[]
+  moveInVerification  MoveInVerification?
 
   @@index([listingId, status])
   @@index([tenantId, status])
@@ -734,36 +916,41 @@ model Tenancy {
 }
 
 model Payment {
-  id                  String          @id @default(uuid()) @db.Uuid
-  reference           String          @unique @db.VarChar(100)
-  providerReference   String?         @unique @db.VarChar(150)
-  provider            PaymentProvider @default(PAYSTACK)
-  status              PaymentStatus   @default(INITIALIZED)
-  applicationId       String          @db.Uuid
-  listingId           String          @db.Uuid
-  tenantId            String          @db.Uuid
-  landlordId          String          @db.Uuid
-  agentId             String?         @db.Uuid
-  rentAmountKobo      BigInt
-  platformFeeKobo     BigInt
-  agentFeeKobo        BigInt          @default(0)
-  cautionFeeKobo      BigInt          @default(0)
-  totalAmountKobo     BigInt
-  currency            String          @default("NGN") @db.Char(3)
-  providerPayload     Json?
-  initializedAt       DateTime        @default(now())
-  verifiedAt          DateTime?
-  failedAt            DateTime?
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
-  application         RentalApplication @relation(fields: [applicationId], references: [id], onDelete: Restrict)
-  listing             Listing         @relation(fields: [listingId], references: [id], onDelete: Restrict)
-  tenant              User            @relation("PaymentTenant", fields: [tenantId], references: [id], onDelete: Restrict)
-  landlord            User            @relation("PaymentLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
-  agent               User?           @relation("PaymentAgent", fields: [agentId], references: [id], onDelete: SetNull)
-  escrow              EscrowRecord?
-  ledgerEntries       LedgerEntry[]
-  payouts             Payout[]
+  id                String            @id @default(uuid()) @db.Uuid
+  reference         String            @unique @db.VarChar(100)
+  providerReference String?           @unique @db.VarChar(150)
+  provider          PaymentProvider   @default(PAYSTACK)
+  status            PaymentStatus     @default(INITIALIZED)
+  applicationId     String            @db.Uuid
+  listingId         String            @db.Uuid
+  tenantId          String            @db.Uuid
+  landlordId        String            @db.Uuid
+  agentId           String?           @db.Uuid
+  rentAmountKobo    BigInt
+  platformFeeKobo   BigInt
+  agentFeeKobo      BigInt            @default(0)
+  legalFeeKobo      BigInt            @default(0)
+  cautionFeeKobo    BigInt            @default(0)
+  totalAmountKobo   BigInt
+  currency          String            @default("NGN") @db.Char(3)
+  providerPayload   Json?
+  cancellationPolicyAcceptedAt DateTime?
+  cancellationPolicyVersion    String? @db.VarChar(50)
+  initializedAt     DateTime          @default(now())
+  verifiedAt        DateTime?
+  failedAt          DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  application       RentalApplication @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  listing           Listing           @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  tenant            User              @relation("PaymentTenant", fields: [tenantId], references: [id], onDelete: Restrict)
+  landlord          User              @relation("PaymentLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
+  agent             User?             @relation("PaymentAgent", fields: [agentId], references: [id], onDelete: SetNull)
+  escrow            EscrowRecord?
+  ledgerEntries     LedgerEntry[]
+  payouts           Payout[]
+  receipts          Receipt[]
+  moveInVerification MoveInVerification?
 
   @@index([applicationId, status])
   @@index([tenantId, createdAt])
@@ -772,38 +959,120 @@ model Payment {
   @@map("payments")
 }
 
+// New transactions have a verification record; its absence identifies legacy
+// transactions, whose existing agreement and escrow lifecycle remains intact.
+model MoveInVerification {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenancyId      String   @unique @db.Uuid
+  paymentId      String   @unique @db.Uuid
+  status         String   @default("AWAITING_HANDOVER") @db.VarChar(40)
+  handoverAt     DateTime?
+  deadlineAt     DateTime?
+  draft          Json?
+  submittedAt    DateTime?
+  verifiedAt     DateTime?
+  adminHold      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  tenancy        Tenancy  @relation(fields: [tenancyId], references: [id], onDelete: Restrict)
+  payment        Payment  @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  issues         MoveInIssue[]
+  events         MoveInEvent[]
+  refundRequests MoveInRefundRequest[]
+  evidence       MoveInEvidence[]
+
+  @@index([status, deadlineAt])
+  @@map("move_in_verifications")
+}
+
+model MoveInRefundRequest {
+  id             String   @id @default(uuid()) @db.Uuid
+  verificationId String   @db.Uuid
+  reason         String   @db.VarChar(4000)
+  status         String   @default("PENDING") @db.VarChar(30)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  verification   MoveInVerification @relation(fields: [verificationId], references: [id], onDelete: Restrict)
+
+  @@index([verificationId, status])
+  @@map("move_in_refund_requests")
+}
+
+model MoveInEvidence {
+  id             String   @id @default(uuid()) @db.Uuid
+  verificationId String   @db.Uuid
+  issueId        String?  @db.Uuid
+  uploaderId     String   @db.Uuid
+  objectKey      String   @unique @db.VarChar(500)
+  createdAt      DateTime @default(now())
+  verification   MoveInVerification @relation(fields: [verificationId], references: [id], onDelete: Restrict)
+
+  @@index([verificationId, issueId])
+  @@map("move_in_evidence")
+}
+
+model MoveInIssue {
+  id                   String   @id @default(uuid()) @db.Uuid
+  verificationId       String   @db.Uuid
+  item                 String   @db.VarChar(40)
+  issueType            String   @db.VarChar(80)
+  description          String   @db.VarChar(4000)
+  severity             String   @db.VarChar(12)
+  status               String   @default("OPEN") @db.VarChar(30)
+  classificationDisputed Boolean @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  verification         MoveInVerification @relation(fields: [verificationId], references: [id], onDelete: Restrict)
+
+  @@index([verificationId, status])
+  @@map("move_in_issues")
+}
+
+model MoveInEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  verificationId String   @db.Uuid
+  actorId        String   @db.Uuid
+  type           String   @db.VarChar(60)
+  details        Json
+  createdAt      DateTime @default(now())
+  verification   MoveInVerification @relation(fields: [verificationId], references: [id], onDelete: Restrict)
+
+  @@index([verificationId, createdAt])
+  @@map("move_in_events")
+}
+
 model EscrowRecord {
-  id                    String        @id @default(uuid()) @db.Uuid
-  paymentId             String        @unique @db.Uuid
-  status                EscrowStatus  @default(HELD)
-  cautionStatus         CautionStatus @default(NOT_APPLICABLE)
-  rentHeldKobo          BigInt
-  cautionHeldKobo       BigInt        @default(0)
-  releaseAuthorizedAt   DateTime?
-  releasedAt            DateTime?
-  createdAt             DateTime      @default(now())
-  updatedAt             DateTime      @updatedAt
-  payment               Payment       @relation(fields: [paymentId], references: [id], onDelete: Restrict)
-  cautionDeductions     CautionDeduction[]
+  id                  String             @id @default(uuid()) @db.Uuid
+  paymentId           String             @unique @db.Uuid
+  status              EscrowStatus       @default(HELD)
+  cautionStatus       CautionStatus      @default(NOT_APPLICABLE)
+  rentHeldKobo        BigInt
+  cautionHeldKobo     BigInt             @default(0)
+  releaseAuthorizedAt DateTime?
+  releasedAt          DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  payment             Payment            @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  cautionDeductions   CautionDeduction[]
 
   @@index([status, createdAt])
   @@map("escrow_records")
 }
 
 model CautionDeduction {
-  id              String   @id @default(uuid()) @db.Uuid
-  escrowRecordId  String   @db.Uuid
-  amountKobo      BigInt
-  reason          String   @db.VarChar(1000)
-  evidence        Json?
-  proposedByUserId String  @db.Uuid
-  acceptedAt      DateTime?
-  disputedAt      DateTime?
-  resolvedAt      DateTime?
-  resolution      CautionDeductionOutcome?
-  resolutionNote  String?  @db.VarChar(1000)
-  createdAt       DateTime @default(now())
-  escrowRecord    EscrowRecord @relation(fields: [escrowRecordId], references: [id], onDelete: Cascade)
+  id               String                   @id @default(uuid()) @db.Uuid
+  escrowRecordId   String                   @db.Uuid
+  amountKobo       BigInt
+  reason           String                   @db.VarChar(1000)
+  evidence         Json?
+  proposedByUserId String                   @db.Uuid
+  acceptedAt       DateTime?
+  disputedAt       DateTime?
+  resolvedAt       DateTime?
+  resolution       CautionDeductionOutcome?
+  resolutionNote   String?                  @db.VarChar(1000)
+  createdAt        DateTime                 @default(now())
+  escrowRecord     EscrowRecord             @relation(fields: [escrowRecordId], references: [id], onDelete: Cascade)
 
   @@index([escrowRecordId, createdAt])
   @@map("caution_deductions")
@@ -828,22 +1097,23 @@ model LedgerEntry {
 }
 
 model Payout {
-  id                String       @id @default(uuid()) @db.Uuid
-  paymentId         String       @db.Uuid
-  recipientUserId   String       @db.Uuid
-  kind              PayoutKind
-  status            PayoutStatus @default(PENDING)
-  amountKobo        BigInt
-  serviceFeeKobo    BigInt       @default(0)
-  providerReference String?      @unique @db.VarChar(150)
-  failureReason     String?      @db.VarChar(1000)
-  scheduledAt       DateTime?
-  paidAt            DateTime?
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
-  payment           Payment      @relation(fields: [paymentId], references: [id], onDelete: Restrict)
-  recipient         User         @relation("PayoutRecipient", fields: [recipientUserId], references: [id], onDelete: Restrict)
+  id                         String                      @id @default(uuid()) @db.Uuid
+  paymentId                  String                      @db.Uuid
+  recipientUserId            String                      @db.Uuid
+  kind                       PayoutKind
+  status                     PayoutStatus                @default(PENDING)
+  amountKobo                 BigInt
+  serviceFeeKobo             BigInt                      @default(0)
+  providerReference          String?                     @unique @db.VarChar(150)
+  failureReason              String?                     @db.VarChar(1000)
+  scheduledAt                DateTime?
+  paidAt                     DateTime?
+  createdAt                  DateTime                    @default(now())
+  updatedAt                  DateTime                    @updatedAt
+  payment                    Payment                     @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  recipient                  User                        @relation("PayoutRecipient", fields: [recipientUserId], references: [id], onDelete: Restrict)
   verificationServiceCharges VerificationServiceCharge[]
+  receipts                   Receipt[]
 
   @@index([recipientUserId, status])
   @@index([paymentId, kind])
@@ -860,6 +1130,7 @@ model VerificationServiceCharge {
   currency          String                          @default("NGN") @db.Char(3)
   paystackReference String?                         @unique @db.VarChar(150)
   providerReference String?                         @unique @db.VarChar(255)
+  identityMethod    PublisherVerificationMethod     @default(NIN)
   ninCiphertext     String                          @db.Text
   ninLast4          String                          @db.Char(4)
   providerPayload   Json?
@@ -877,44 +1148,44 @@ model VerificationServiceCharge {
 }
 
 model WebhookEvent {
-  id             String   @id @default(uuid()) @db.Uuid
-  provider       PaymentProvider
-  eventType      String   @db.VarChar(120)
-  eventHash      String   @unique @db.Char(64)
-  payload        Json
-  processingError String? @db.VarChar(1000)
-  receivedAt     DateTime @default(now())
-  processedAt    DateTime?
+  id              String          @id @default(uuid()) @db.Uuid
+  provider        PaymentProvider
+  eventType       String          @db.VarChar(120)
+  eventHash       String          @unique @db.Char(64)
+  payload         Json
+  processingError String?         @db.VarChar(1000)
+  receivedAt      DateTime        @default(now())
+  processedAt     DateTime?
 
   @@index([provider, eventType, receivedAt])
   @@map("webhook_events")
 }
 
 model MaintenanceRequest {
-  id            String              @id @default(uuid()) @db.Uuid
-  listingId     String              @db.Uuid
-  tenancyId     String?             @db.Uuid
-  reporterId    String              @db.Uuid
-  landlordId    String              @db.Uuid
-  agentId       String?             @db.Uuid
-  assignedToId  String?             @db.Uuid
-  title         String              @db.VarChar(200)
-  category      MaintenanceCategory
-  description   String              @db.Text
-  priority      MaintenancePriority @default(MEDIUM)
-  status        MaintenanceStatus  @default(OPEN)
-  resolvedAt    DateTime?
-  closedAt      DateTime?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  listing       Listing             @relation(fields: [listingId], references: [id], onDelete: Restrict)
-  tenancy       Tenancy?            @relation(fields: [tenancyId], references: [id], onDelete: SetNull)
-  reporter      User                @relation("MaintenanceReporter", fields: [reporterId], references: [id], onDelete: Restrict)
-  landlord      User                @relation("MaintenanceLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
-  agent         User?               @relation("MaintenanceAgent", fields: [agentId], references: [id], onDelete: SetNull)
-  assignedTo    User?               @relation("MaintenanceAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
-  updates       MaintenanceUpdate[]
-  attachments   MaintenanceAttachment[]
+  id           String                  @id @default(uuid()) @db.Uuid
+  listingId    String                  @db.Uuid
+  tenancyId    String?                 @db.Uuid
+  reporterId   String                  @db.Uuid
+  landlordId   String                  @db.Uuid
+  agentId      String?                 @db.Uuid
+  assignedToId String?                 @db.Uuid
+  title        String                  @db.VarChar(200)
+  category     MaintenanceCategory
+  description  String                  @db.Text
+  priority     MaintenancePriority     @default(MEDIUM)
+  status       MaintenanceStatus       @default(OPEN)
+  resolvedAt   DateTime?
+  closedAt     DateTime?
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  listing      Listing                 @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  tenancy      Tenancy?                @relation(fields: [tenancyId], references: [id], onDelete: SetNull)
+  reporter     User                    @relation("MaintenanceReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  landlord     User                    @relation("MaintenanceLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
+  agent        User?                   @relation("MaintenanceAgent", fields: [agentId], references: [id], onDelete: SetNull)
+  assignedTo   User?                   @relation("MaintenanceAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  updates      MaintenanceUpdate[]
+  attachments  MaintenanceAttachment[]
 
   @@index([listingId, status])
   @@index([reporterId, status])
@@ -953,20 +1224,43 @@ model MaintenanceAttachment {
 }
 
 model Conversation {
-  id              String             @id @default(uuid()) @db.Uuid
-  listingId       String?            @db.Uuid
-  type            ConversationType   @default(LISTING_ENQUIRY)
-  subject         String?            @db.VarChar(255)
-  lastMessageAt   DateTime?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  listing         Listing?           @relation(fields: [listingId], references: [id], onDelete: SetNull)
-  members         ConversationMember[]
-  messages        Message[]
+  id            String               @id @default(uuid()) @db.Uuid
+  listingId     String?              @db.Uuid
+  type          ConversationType     @default(LISTING_ENQUIRY)
+  subject       String?              @db.VarChar(255)
+  lastMessageAt DateTime?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  listing       Listing?             @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  members       ConversationMember[]
+  messages      Message[]
+  escalations   PropertyQuestionEscalation[]
 
   @@index([listingId, lastMessageAt])
   @@index([lastMessageAt])
   @@map("conversations")
+}
+
+model PropertyQuestionEscalation {
+  id                 String       @id @default(uuid()) @db.Uuid
+  conversationId     String       @db.Uuid
+  questionMessageId  String       @unique @db.Uuid
+  tenantId           String       @db.Uuid
+  contactId          String       @db.Uuid
+  question           String       @db.Text
+  response           String?      @db.Text
+  assistantMessageId String?      @unique @db.Uuid
+  createdAt          DateTime     @default(now())
+  respondedAt        DateTime?
+  conversation       Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  tenant             User         @relation("QuestionTenant", fields: [tenantId], references: [id], onDelete: Restrict)
+  contact            User         @relation("QuestionContact", fields: [contactId], references: [id], onDelete: Restrict)
+  questionMessage    Message      @relation("EscalatedQuestion", fields: [questionMessageId], references: [id], onDelete: Cascade)
+  assistantMessage   Message?     @relation("EscalatedAnswer", fields: [assistantMessageId], references: [id], onDelete: SetNull)
+
+  @@index([contactId, respondedAt, createdAt])
+  @@index([conversationId, createdAt])
+  @@map("property_question_escalations")
 }
 
 model ConversationMember {
@@ -983,27 +1277,29 @@ model ConversationMember {
 }
 
 model Message {
-  id             String       @id @default(uuid()) @db.Uuid
-  conversationId String       @db.Uuid
-  senderId       String?      @db.Uuid
-  kind           MessageKind  @default(USER)
-  body           String       @db.Text
-  createdAt      DateTime     @default(now())
+  id             String           @id @default(uuid()) @db.Uuid
+  conversationId String           @db.Uuid
+  senderId       String?          @db.Uuid
+  kind           MessageKind      @default(USER)
+  body           String           @db.Text
+  createdAt      DateTime         @default(now())
   editedAt       DateTime?
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender         User?        @relation("MessageSender", fields: [senderId], references: [id], onDelete: SetNull)
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User?            @relation("MessageSender", fields: [senderId], references: [id], onDelete: SetNull)
   receipts       MessageReceipt[]
+  escalationQuestion PropertyQuestionEscalation? @relation("EscalatedQuestion")
+  escalationAnswer   PropertyQuestionEscalation? @relation("EscalatedAnswer")
 
   @@index([conversationId, createdAt])
   @@map("messages")
 }
 
 model MessageReceipt {
-  messageId  String   @db.Uuid
-  userId     String   @db.Uuid
-  readAt     DateTime @default(now())
-  message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messageId String   @db.Uuid
+  userId    String   @db.Uuid
+  readAt    DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([messageId, userId])
   @@index([userId, readAt])
@@ -1037,47 +1333,181 @@ model NotificationPreference {
   @@map("notification_preferences")
 }
 
+// Push credentials are encrypted and never returned by the device API.
+model PushDevice {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @db.Uuid
+  provider        String   @db.VarChar(16)
+  credentialHash  String   @unique @db.Char(64)
+  encryptedData   String   @db.Text
+  label           String?  @db.VarChar(120)
+  createdAt       DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries      PushDelivery[]
+  @@index([userId])
+  @@map("push_devices")
+}
+
+model PushDelivery {
+  id             String   @id @default(uuid()) @db.Uuid
+  notificationId String   @db.Uuid
+  deviceId       String?  @db.Uuid
+  status         String   @db.VarChar(24)
+  attempts       Int      @default(0)
+  updatedAt      DateTime @updatedAt
+  device         PushDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  @@unique([notificationId, deviceId])
+  @@index([status, updatedAt])
+  @@map("push_deliveries")
+}
+
 model Review {
-  id             String           @id @default(uuid()) @db.Uuid
-  listingId      String?          @db.Uuid
-  authorId       String           @db.Uuid
-  targetUserId   String?          @db.Uuid
-  targetType     ReviewTargetType
-  score          Int
-  body           String           @db.VarChar(2000)
-  status         ReviewStatus     @default(PUBLISHED)
-  reportedAt     DateTime?
-  moderationNote String?          @db.VarChar(1000)
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  listing        Listing?         @relation(fields: [listingId], references: [id], onDelete: SetNull)
-  author         User             @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Restrict)
-  targetUser     User?            @relation("ReviewTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  id                String           @id @default(uuid()) @db.Uuid
+  tenancyId         String?          @db.Uuid
+  inspectionId      String?          @db.Uuid
+  listingId         String?          @db.Uuid
+  authorId          String           @db.Uuid
+  targetUserId      String?          @db.Uuid
+  targetType        ReviewTargetType
+  score             Int
+  body              String           @db.VarChar(2000)
+  status            ReviewStatus     @default(PUBLISHED)
+  reportedAt        DateTime?
+  moderationNote    String?          @db.VarChar(1000)
+  disputedAt        DateTime?
+  disputeReason     String?          @db.VarChar(1000)
+  disputeResolvedAt DateTime?
+  ratingDimensions  Json?
+  moderatedByUserId String?          @db.Uuid
+  moderatedAt       DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  listing           Listing?         @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  author            User             @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  targetUser        User?            @relation("ReviewTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  tenancy           Tenancy?         @relation(fields: [tenancyId], references: [id], onDelete: SetNull)
+  inspection        InspectionBooking? @relation(fields: [inspectionId], references: [id], onDelete: Restrict)
 
   @@index([listingId, status, createdAt])
   @@index([targetUserId, status, createdAt])
+  @@index([listingId, status, targetType, createdAt])
+  @@index([targetUserId, status, targetType, createdAt])
+  @@index([tenancyId, authorId])
+  @@index([inspectionId, authorId])
   @@map("reviews")
 }
 
+model TenancyAgreement {
+  id            String               @id @default(uuid()) @db.Uuid
+  tenancyId     String               @unique @db.Uuid
+  reference     String               @unique @db.VarChar(64)
+  status        AgreementStatus      @default(PENDING_SIGNATURES)
+  termsVersion  String               @db.VarChar(50)
+  renderedTerms Json
+  documentHash  String               @db.Char(64)
+  generatedAt   DateTime             @default(now())
+  executedAt    DateTime?
+  voidedAt      DateTime?
+  voidReason    String?              @db.VarChar(1000)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  tenancy       Tenancy              @relation(fields: [tenancyId], references: [id], onDelete: Restrict)
+  signatures    AgreementSignature[]
+
+  @@index([status, generatedAt])
+  @@map("tenancy_agreements")
+}
+
+model AgreementSignature {
+  id                  String                   @id @default(uuid()) @db.Uuid
+  agreementId         String                   @db.Uuid
+  signerUserId        String                   @db.Uuid
+  signerRole          AgreementSignerRole
+  method              AgreementSignatureMethod
+  signerName          String                   @db.VarChar(200)
+  signedAt            DateTime                 @default(now())
+  ipAddressHash       String?                  @db.Char(64)
+  userAgentHash       String?                  @db.Char(64)
+  uploadedDocumentUrl String?                  @db.Text
+  createdAt           DateTime                 @default(now())
+  agreement           TenancyAgreement         @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  signer              User                     @relation(fields: [signerUserId], references: [id], onDelete: Restrict)
+
+  @@unique([agreementId, signerUserId])
+  @@index([signerUserId, signedAt])
+  @@map("agreement_signatures")
+}
+
+model GuarantorForm {
+  id                        String                   @id @default(uuid()) @db.Uuid
+  tenancyId                 String                   @unique @db.Uuid
+  reference                 String                   @unique @db.VarChar(64)
+  status                    GuarantorFormStatus      @default(PENDING_SIGNATURE)
+  prospectiveTenantName     String                   @db.VarChar(200)
+  guarantorName             String                   @db.VarChar(200)
+  knownForYears             Int
+  homeAddress               String                   @db.VarChar(500)
+  businessAddress           String                   @db.VarChar(500)
+  telephone                 String                   @db.VarChar(32)
+  profession                String                   @db.VarChar(200)
+  qualification             String                   @db.VarChar(300)
+  passportObjectKey         String                   @unique @db.VarChar(500)
+  documentHash              String                   @db.Char(64)
+  signatureMethod           GuarantorSignatureMethod?
+  signerName                String?                  @db.VarChar(200)
+  signedAt                  DateTime?
+  uploadedSignedCopyObjectKey String?                @unique @db.VarChar(500)
+  submittedByUserId         String                   @db.Uuid
+  createdAt                 DateTime                 @default(now())
+  updatedAt                 DateTime                 @updatedAt
+  tenancy                   Tenancy                  @relation(fields: [tenancyId], references: [id], onDelete: Restrict)
+  submittedBy               User                     @relation("GuarantorFormSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([submittedByUserId, status])
+  @@index([status, createdAt])
+  @@map("guarantor_forms")
+}
+
+model Receipt {
+  id              String      @id @default(uuid()) @db.Uuid
+  receiptNumber   String      @unique @db.VarChar(64)
+  kind            ReceiptKind
+  paymentId       String      @db.Uuid
+  payoutId        String?     @db.Uuid
+  recipientUserId String      @db.Uuid
+  issuedAt        DateTime    @default(now())
+  voidedAt        DateTime?
+  metadata        Json
+  payment         Payment     @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  payout          Payout?     @relation(fields: [payoutId], references: [id], onDelete: Restrict)
+  recipient       User        @relation("ReceiptRecipient", fields: [recipientUserId], references: [id], onDelete: Restrict)
+
+  @@unique([paymentId, kind])
+  @@unique([payoutId, kind])
+  @@index([recipientUserId, issuedAt])
+  @@map("receipts")
+}
+
 model IncidentReport {
-  id                 String           @id @default(uuid()) @db.Uuid
-  reference          String           @unique @db.VarChar(40)
-  reporterId         String           @db.Uuid
-  listingId          String?          @db.Uuid
-  assignedToUserId   String?          @db.Uuid
-  type               IncidentType
-  severity           IncidentSeverity
-  description        String           @db.Text
-  occurredAt         DateTime?
-  confidential       Boolean          @default(true)
-  status             IncidentStatus   @default(SUBMITTED)
-  resolutionNote     String?          @db.VarChar(2000)
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
-  reporter           User             @relation("IncidentReporter", fields: [reporterId], references: [id], onDelete: Restrict)
-  listing            Listing?         @relation(fields: [listingId], references: [id], onDelete: SetNull)
-  assignedTo         User?            @relation("IncidentAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
-  evidence           IncidentEvidence[]
+  id               String             @id @default(uuid()) @db.Uuid
+  reference        String             @unique @db.VarChar(40)
+  reporterId       String             @db.Uuid
+  listingId        String?            @db.Uuid
+  assignedToUserId String?            @db.Uuid
+  type             IncidentType
+  severity         IncidentSeverity
+  description      String             @db.Text
+  occurredAt       DateTime?
+  confidential     Boolean            @default(true)
+  status           IncidentStatus     @default(SUBMITTED)
+  resolutionNote   String?            @db.VarChar(2000)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  reporter         User               @relation("IncidentReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  listing          Listing?           @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  assignedTo       User?              @relation("IncidentAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  evidence         IncidentEvidence[]
 
   @@index([status, severity, createdAt])
   @@index([reporterId, createdAt])
@@ -1099,19 +1529,19 @@ model IncidentEvidence {
 }
 
 model AdminInvitation {
-  id                String    @id @default(uuid()) @db.Uuid
-  email             String    @unique @db.VarChar(320)
-  tokenHash         String    @unique @db.Char(64)
-  role              RoleCode  @default(ADMIN)
-  adminTitle        String?   @db.VarChar(150)
-  invitedByUserId   String    @db.Uuid
-  acceptedByUserId  String?   @unique @db.Uuid
-  expiresAt         DateTime
-  acceptedAt        DateTime?
-  revokedAt         DateTime?
-  createdAt         DateTime  @default(now())
-  invitedBy         User      @relation("AdminInvitationSender", fields: [invitedByUserId], references: [id], onDelete: Restrict)
-  acceptedBy        User?     @relation("AdminInvitationAccepted", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+  id               String    @id @default(uuid()) @db.Uuid
+  email            String    @unique @db.VarChar(320)
+  tokenHash        String    @unique @db.Char(64)
+  role             RoleCode  @default(ADMIN)
+  adminTitle       String?   @db.VarChar(150)
+  invitedByUserId  String    @db.Uuid
+  acceptedByUserId String?   @unique @db.Uuid
+  expiresAt        DateTime
+  acceptedAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  invitedBy        User      @relation("AdminInvitationSender", fields: [invitedByUserId], references: [id], onDelete: Restrict)
+  acceptedBy       User?     @relation("AdminInvitationAccepted", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
 
   @@index([expiresAt])
   @@map("admin_invitations")

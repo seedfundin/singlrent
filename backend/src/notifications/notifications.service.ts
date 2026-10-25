@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { NotificationChannel, NotificationType, Prisma } from '@prisma/client';
 import { pageResult, Paginated } from '../common/http/pagination';
 import { PrismaService } from '../common/database/prisma.service';
@@ -8,6 +8,7 @@ import { NotificationQuery, UpdatePreferencesRequest } from './dto/notification.
 
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtimeGateway: RealtimeGateway,
@@ -23,8 +24,16 @@ export class NotificationsService {
   }) {
     const notification = await this.prisma.notification.create({ data: input });
     this.realtimeGateway.emitNotification(input.userId, notification);
-    await this.enqueueEnabledDeliveries(notification.id, input.userId, input.title, input.body, input.type);
+    await this.enqueueEnabledDeliveries(notification.id, input.userId, input.title, input.body, input.type, input.data).catch(() => {
+      this.logger.warn('Could not queue notification deliveries; the in-app record was preserved.');
+    });
     return notification;
+  }
+
+  // Used after a transactional notification record has committed. The record is
+  // still the source of truth, and delivery problems never undo the transaction.
+  async dispatchExisting(notification: { id: string; userId: string; title: string; body: string; type: NotificationType; data?: unknown }): Promise<void> {
+    await this.enqueueEnabledDeliveries(notification.id, notification.userId, notification.title, notification.body, notification.type, notification.data).catch(() => undefined);
   }
 
   async list(userId: string, query: NotificationQuery): Promise<Paginated<Awaited<ReturnType<PrismaService['notification']['findMany']>>[number]>> {
@@ -52,6 +61,14 @@ export class NotificationsService {
         throw new NotFoundException('Notification not found');
       }
     }
+  }
+
+  async getOne(userId: string, notificationId: string) {
+    // Invalid IDs must not produce database errors, and records are always scoped to the current user.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(notificationId)) throw new NotFoundException('Notification not found');
+    const notification = await this.prisma.notification.findFirst({ where: { id: notificationId, userId } });
+    if (!notification) throw new NotFoundException('Notification not found');
+    return notification;
   }
 
   markAllRead(userId: string): Promise<void> {
@@ -92,15 +109,18 @@ export class NotificationsService {
     title: string,
     body: string,
     type: NotificationType,
+    data?: unknown,
   ): Promise<void> {
+    const conversationId = type === NotificationType.NEW_MESSAGE && data && typeof data === 'object' && 'conversationId' in data && typeof data.conversationId === 'string' && /^[0-9a-f-]{36}$/i.test(data.conversationId) ? data.conversationId : undefined;
     const preferences = await this.prisma.notificationPreference.findMany({ where: { userId, type } });
     const disabled = new Set(preferences.filter((preference) => !preference.enabled).map((preference) => preference.channel));
-    const channels: Array<'IN_APP' | 'EMAIL'> = [NotificationChannel.IN_APP, NotificationChannel.EMAIL];
+    const channels: Array<'IN_APP' | 'EMAIL' | 'PUSH'> = [NotificationChannel.IN_APP, NotificationChannel.EMAIL];
+    if (process.env.PUSH_NOTIFICATIONS_ENABLED === 'true') channels.push(NotificationChannel.PUSH);
     await Promise.all(
       channels
         .filter((channel) => !disabled.has(channel))
         .map((channel) =>
-          this.notificationJobs.enqueue({ userId, title, body, channel, notificationId }).catch(() => undefined),
+          this.notificationJobs.enqueue({ userId, title, body, channel, notificationId, conversationId }).catch(() => undefined),
         ),
     );
   }

@@ -4,8 +4,11 @@ import { pageResult, Paginated } from '../common/http/pagination';
 import { PrismaService } from '../common/database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { TenancyQuery } from './dto/tenancy.schemas';
+import { blocksVerification } from '../move-in/move-in.rules';
 
 const tenancyInclude = {
+  application: { select: { status: true } },
+  moveInVerification: { select: { status: true } },
   listing: { select: { id: true, slug: true, title: true, address: true } },
   tenant: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
   landlord: { select: { id: true, firstName: true, lastName: true } },
@@ -45,13 +48,29 @@ export class TenanciesService {
       throw new ConflictException('Only a pending move-in tenancy can be activated');
     }
     const updated = await this.prisma.$transaction(async (transaction) => {
-      const saved = await transaction.tenancy.update({ where: { id: tenancy.id }, data: { status: TenancyStatus.ACTIVE }, include: tenancyInclude });
+      const initial = await transaction.moveInVerification.findUnique({ where: { tenancyId }, select: { paymentId: true } });
+      if (initial) {
+        await transaction.$queryRaw`SELECT id FROM "escrow_records" WHERE "paymentId" = ${initial.paymentId}::uuid FOR UPDATE`;
+        const verification = await transaction.moveInVerification.findUniqueOrThrow({ where: { tenancyId }, include: { tenancy: { include: { agreement: true, guarantorForm: true } }, issues: true, refundRequests: { where: { status: 'PENDING' } }, payment: { include: { escrow: true, payouts: true } } } });
+        if (verification.status !== 'VERIFIED' || verification.adminHold || verification.issues.some((issue) => blocksVerification({ severity: issue.severity as 'MINOR' | 'MAJOR' | 'CRITICAL', resolved: issue.status === 'RESOLVED', classificationDisputed: issue.classificationDisputed })) || verification.refundRequests.length > 0 || verification.tenancy.agreement?.status !== 'EXECUTED' || verification.tenancy.guarantorForm?.status !== 'EXECUTED' || verification.payment.escrow?.status !== 'HELD' || verification.payment.payouts.some((p) => ['REFUND', 'CAUTION_REFUND'].includes(p.kind) && !['FAILED', 'CANCELLED'].includes(p.status))) {
+          throw new ConflictException('Verification, the signed agreement and the completed guarantor form must be recorded, with the payment protected and no refund or dispute, before activation');
+        }
+      } else if (tenancy.application.status !== ApplicationStatus.APPROVED) {
+        throw new ConflictException('Payment release must be authorized before a legacy tenancy can be activated');
+      }
+      const claimed = await transaction.tenancy.updateMany({ where: { id: tenancy.id, status: TenancyStatus.PENDING_MOVE_IN }, data: { status: TenancyStatus.ACTIVE } });
+      if (claimed.count !== 1) throw new ConflictException('Tenancy is no longer pending');
+      const saved = await transaction.tenancy.findUniqueOrThrow({ where: { id: tenancy.id }, include: tenancyInclude });
       await transaction.rentalApplication.update({ where: { id: tenancy.applicationId }, data: { status: ApplicationStatus.ACTIVE } });
+      await transaction.listing.updateMany({
+        where: { id: tenancy.listingId, status: { not: 'ARCHIVED' } },
+        data: { availability: ListingAvailability.RENTED },
+      });
       return saved;
     });
     await this.notificationsService.create({
       userId: updated.tenantId,
-      type: NotificationType.ESCROW_UPDATED,
+      type: NotificationType.TENANCY_UPDATED,
       title: 'Tenancy is active',
       body: `Your tenancy for ${updated.listing.title} is now active.`,
       data: { tenancyId: updated.id },

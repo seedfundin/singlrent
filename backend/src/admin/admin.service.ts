@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { KycStatus, ListingStatus, PermissionEffect, Prisma, RoleCode, UserStatus } from '@prisma/client';
+import { IdentityNameMatchStatus, KycStatus, ListingStatus, PermissionEffect, Prisma, PublisherVerificationStatus, RoleCode, UserStatus } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
 import { PasswordService } from '../common/auth/password.service';
 import { AuditService } from '../common/database/audit.service';
@@ -19,6 +19,7 @@ import {
   CreateAdminInvitationRequest,
   ModerateListingRequest,
   ReviewKycRequest,
+  ReviewPublisherVerificationRequest,
   UpdatePermissionsRequest,
   UpdateUserStatusRequest,
 } from './dto/admin.schemas';
@@ -35,7 +36,22 @@ const adminListingInclude = {
 // ledger movements are sufficient for authorized financial staff.
 const adminTransactionInclude = {
   listing: { select: { id: true, slug: true, title: true, source: true } },
-  application: { select: { id: true, status: true, moveInDate: true, leaseMonths: true } },
+  application: {
+    select: {
+      id: true,
+      status: true,
+      moveInDate: true,
+      leaseMonths: true,
+      tenancy: {
+        select: {
+          id: true,
+          status: true,
+          agreement: { select: { status: true, executedAt: true } },
+          guarantorForm: { select: { status: true, signedAt: true } },
+        },
+      },
+    },
+  },
   tenant: { select: { id: true, firstName: true, lastName: true, email: true } },
   landlord: { select: { id: true, firstName: true, lastName: true, email: true } },
   agent: { select: { id: true, firstName: true, lastName: true, email: true } },
@@ -64,6 +80,16 @@ const adminTransactionInclude = {
         },
         orderBy: { createdAt: 'asc' as const },
       },
+    },
+  },
+  moveInVerification: {
+    select: {
+      status: true,
+      submittedAt: true,
+      verifiedAt: true,
+      adminHold: true,
+      issues: { select: { severity: true, status: true, classificationDisputed: true } },
+      refundRequests: { select: { status: true } },
     },
   },
   payouts: {
@@ -109,6 +135,16 @@ export class AdminService {
     private readonly redis: RedisService,
   ) {}
 
+  async notificationActivity() {
+    if (!this.configService.get<boolean>('PUSH_NOTIFICATIONS_ENABLED')) return { enabled: false, activeDevices: 0, attempts: 0, accepted: 0, failed: 0, invalid: 0 };
+    const [activeDevices, statuses] = await Promise.all([
+      this.prisma.pushDevice.count(),
+      this.prisma.pushDelivery.groupBy({ by: ['status'], _count: { _all: true }, _sum: { attempts: true } }),
+    ]);
+    const count = (status: string) => statuses.find((row) => row.status === status)?._count._all ?? 0;
+    return { enabled: true, activeDevices, attempts: statuses.reduce((sum, row) => sum + (row._sum.attempts ?? 0), 0), accepted: count('ACCEPTED'), failed: count('FAILED'), invalid: count('INVALID') };
+  }
+
   async listUsers(query: AdminUserQuery) {
     const where: Prisma.UserWhereInput = {
       status: query.status,
@@ -124,7 +160,8 @@ export class AdminService {
     const include = {
       userRoles: { include: { role: true } },
       directPermissions: { include: { permission: true } },
-      kyc: { select: { status: true, phoneStatus: true, ninStatus: true, updatedAt: true } },
+      kyc: { select: { status: true, phoneStatus: true, ninStatus: true, identityMethod: true, nameMatchStatus: true, nameMatchReason: true, updatedAt: true } },
+      publisherVerification: { select: { status: true, method: true, nameMatchStatus: true, nameMatchReason: true, updatedAt: true } },
     } satisfies Prisma.UserInclude;
     const [items, total] = await this.prisma.$transaction([
       this.prisma.user.findMany({
@@ -211,7 +248,7 @@ export class AdminService {
       database,
       redis,
       integrations: {
-        paystack: this.configService.get<string>('PAYSTACK_SECRET_KEY') ? 'configured' as const : 'not_configured' as const,
+        paymentService: this.configService.get<string>('PAYSTACK_SECRET_KEY') ? 'configured' as const : 'not_configured' as const,
         dojah: this.configService.get<string>('DOJAH_APP_ID') && this.configService.get<string>('DOJAH_SECRET_KEY') ? 'configured' as const : 'not_configured' as const,
         r2: this.configService.get<string>('CLOUDFLARE_R2_BUCKET_NAME') && this.configService.get<string>('CLOUDFLARE_R2_PUBLIC_URL') ? 'configured' as const : 'not_configured' as const,
       },
@@ -231,6 +268,16 @@ export class AdminService {
     const role = await this.prisma.role.findUnique({ where: { code: input.role } });
     if (!role) {
       throw new NotFoundException('Role not found');
+    }
+    if (input.role === RoleCode.AGENT) {
+      const target = await this.prisma.user.findUnique({
+        where: { id: userId },
+        include: { agentProfile: { select: { dateOfBirth: true } } },
+      });
+      if (!target) throw new NotFoundException('User not found');
+      if (!target.agentProfile?.dateOfBirth || !isAdult(target.agentProfile.dateOfBirth)) {
+        throw new BadRequestException('An agent role requires a date of birth showing the user is at least 18');
+      }
     }
     await this.prisma.userRole.upsert({
       where: { userId_roleId: { userId, roleId: role.id } },
@@ -316,34 +363,78 @@ export class AdminService {
   }
 
   async reviewKyc(actorId: string, userId: string, input: ReviewKycRequest) {
-    if (input.approved) {
-      throw new ForbiddenException('KYC can only be verified by a successful Dojah NIN confirmation');
-    }
-    if (!input.approved && !input.rejectionReason) {
-      throw new ConflictException('Provide a rejection reason when declining KYC');
-    }
+    const reviewNote = input.reviewNote ?? input.rejectionReason;
+    if (!reviewNote) throw new ConflictException('Provide an audit note for this identity review');
     const kyc = await this.prisma.kycProfile.findUnique({ where: { userId } });
     if (!kyc) {
       throw new NotFoundException('KYC profile not found');
     }
-    const status = KycStatus.REJECTED;
+    const kycNameReviewNeeded = kyc.nameMatchStatus === IdentityNameMatchStatus.MISMATCHED
+      || kyc.nameMatchStatus === IdentityNameMatchStatus.UNAVAILABLE;
+    if (input.approved && (kyc.status !== KycStatus.UNDER_REVIEW || !kycNameReviewNeeded)) {
+      throw new ForbiddenException('Only a Dojah-confirmed identity held for a name review can be approved manually');
+    }
+    const status = input.approved ? KycStatus.VERIFIED : KycStatus.REJECTED;
     const updated = await this.prisma.kycProfile.update({
       where: { userId },
       data: {
         status,
         ninStatus: status,
-        verifiedAt: null,
+        verifiedAt: input.approved ? new Date() : null,
         reviewedAt: new Date(),
         reviewedByUserId: actorId,
-        rejectionReason: input.rejectionReason,
+        rejectionReason: input.approved ? null : reviewNote,
       },
     });
     await this.notificationsService.create({
       userId,
       type: 'KYC_UPDATED',
-      title: 'KYC needs attention',
-      body: 'Your KYC submission requires an update.',
+      title: input.approved ? 'Identity verification approved' : 'KYC needs attention',
+      body: input.approved ? 'An administrator completed the review of your identity verification.' : 'Your KYC submission requires an update.',
       data: { status },
+    });
+    await this.audit.record({
+      actorUserId: actorId,
+      action: input.approved ? 'kyc.name_review_approved' : 'kyc.name_review_rejected',
+      entityType: 'kyc_profile',
+      entityId: updated.id,
+      metadata: { nameMatchStatus: updated.nameMatchStatus, reviewNote },
+    });
+    return updated;
+  }
+
+  async reviewPublisherVerification(actorId: string, userId: string, input: ReviewPublisherVerificationRequest) {
+    const reviewNote = input.reviewNote ?? input.rejectionReason;
+    if (!reviewNote) throw new ConflictException('Provide an audit note for this identity review');
+    const verification = await this.prisma.publisherVerification.findUnique({ where: { userId } });
+    if (!verification) throw new NotFoundException('Publisher verification not found');
+    const publisherNameReviewNeeded = verification.nameMatchStatus === IdentityNameMatchStatus.MISMATCHED
+      || verification.nameMatchStatus === IdentityNameMatchStatus.UNAVAILABLE;
+    if (input.approved && (verification.status !== PublisherVerificationStatus.UNDER_REVIEW || !publisherNameReviewNeeded)) {
+      throw new ForbiddenException('Only a Dojah-confirmed publisher identity held for a name review can be approved manually');
+    }
+    const status = input.approved ? PublisherVerificationStatus.VERIFIED : PublisherVerificationStatus.REJECTED;
+    const updated = await this.prisma.publisherVerification.update({
+      where: { id: verification.id },
+      data: {
+        status,
+        verifiedAt: input.approved ? new Date() : null,
+        failureReason: input.approved ? null : reviewNote,
+      },
+    });
+    await this.notificationsService.create({
+      userId,
+      type: 'VERIFICATION_UPDATED',
+      title: input.approved ? 'Publisher identity approved' : 'Publisher verification needs attention',
+      body: input.approved ? 'An administrator completed the review of your publisher identity verification.' : 'Your publisher verification requires an update.',
+      data: { status },
+    });
+    await this.audit.record({
+      actorUserId: actorId,
+      action: input.approved ? 'publisher_verification.name_review_approved' : 'publisher_verification.name_review_rejected',
+      entityType: 'publisher_verification',
+      entityId: updated.id,
+      metadata: { method: updated.method, nameMatchStatus: updated.nameMatchStatus, reviewNote },
     });
     return updated;
   }
@@ -393,4 +484,11 @@ export class AdminService {
   private hashToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
   }
+}
+
+function isAdult(dateOfBirth: Date): boolean {
+  const threshold = new Date();
+  threshold.setHours(0, 0, 0, 0);
+  threshold.setFullYear(threshold.getFullYear() - 18);
+  return dateOfBirth <= threshold;
 }

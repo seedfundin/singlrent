@@ -48,6 +48,9 @@ export const listingQuerySchema = paginationQuerySchema.extend({
   amenities: z.string().trim().max(500).optional(),
   status: z.nativeEnum(ListingStatus).optional(),
   availability: z.nativeEnum(ListingAvailability).optional(),
+  // Reputation is never the default sort: people can deliberately choose it,
+  // while relevance, availability and recency remain the ordinary discovery path.
+  sort: z.enum(['RECENT', 'RECOMMENDED']).default('RECENT'),
 });
 
 export type CreateListingRequest = z.infer<typeof createListingSchema>;

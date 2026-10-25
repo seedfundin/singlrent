@@ -57,7 +57,7 @@ export function EscrowSettlement({ payment, tenancy, role, token, onRefresh }: P
     [escrow?.cautionDeductions],
   );
 
-  if (!escrow || heldCaution <= 0) return null;
+  if (!escrow || (heldCaution <= 0 && !tenancy?.moveInVerification)) return null;
 
   const refreshAfter = async () => {
     await onRefresh();
@@ -70,7 +70,7 @@ export function EscrowSettlement({ payment, tenancy, role, token, onRefresh }: P
       await operation();
       await refreshAfter();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The escrow action could not be completed.");
+      setError(cause instanceof Error ? cause.message : "The payment-protection action could not be completed.");
     } finally {
       setBusy(null);
     }
@@ -111,7 +111,7 @@ export function EscrowSettlement({ payment, tenancy, role, token, onRefresh }: P
       <span><ShieldCheck size={19} /><span><small>Protected caution balance</small><h3>End-of-tenancy settlement</h3></span></span>
       <Status tone={escrow.cautionStatus === "DISPUTED" ? "red" : escrow.cautionStatus === "HELD" ? "gold" : "green"}>{label(escrow.cautionStatus)}</Status>
     </header>
-    <p>The held caution amount is <b>{formatNaira(heldCaution / 100)}</b>. Rent escrow and caution settlement are kept as separate, traceable balances.</p>
+    <p>{heldCaution > 0 ? <>The held caution amount is <b>{formatNaira(heldCaution / 100)}</b>. Rent and caution are kept as separate, traceable balances.</> : "No caution deposit is held for this tenancy."}</p>
     {error && <p className="rental-alert error" role="alert"><CircleAlert size={15} /> {error}</p>}
 
     {tenancy ? <div className="tenancy-settlement-state">
@@ -135,7 +135,7 @@ export function EscrowSettlement({ payment, tenancy, role, token, onRefresh }: P
 
     {isManager && tenancy?.status === "ENDED" && <div className="caution-manager-actions">
       {escrow.cautionStatus === "HELD" && unresolved.length === 0 && <>
-        <div className="caution-return"><span><WalletCards size={18} /><span><b>Return remaining caution</b><small>Schedules a Paystack transfer to the tenant’s saved bank account.</small></span></span><Button size="sm" variant="outline" disabled={Boolean(busy)} onClick={() => void handle("return", () => api.payments.returnRemainingCaution(token, payment.id))}>{busy === "return" ? <LoaderCircle className="spin" size={14} /> : "Return balance"}</Button></div>
+        <div className="caution-return"><span><WalletCards size={18} /><span><b>Return remaining caution</b><small>Schedules a secure bank transfer to the tenant’s saved account.</small></span></span><Button size="sm" variant="outline" disabled={Boolean(busy)} onClick={() => void handle("return", () => api.payments.returnRemainingCaution(token, payment.id))}>{busy === "return" ? <LoaderCircle className="spin" size={14} /> : "Return balance"}</Button></div>
         <details className="caution-propose"><summary>Propose a documented deduction instead</summary><div><label>Amount (₦)<input inputMode="decimal" value={deductionAmount} onChange={(event) => setDeductionAmount(event.target.value)} placeholder="0.00" /></label><label>Reason<textarea value={deductionReason} onChange={(event) => setDeductionReason(event.target.value)} maxLength={1000} placeholder="Describe the verified damage, arrears, or repair" /></label><label>Evidence links <small>Optional; one URL per line or comma-separated</small><textarea value={evidence} onChange={(event) => setEvidence(event.target.value)} placeholder="https://…" /></label><Button size="sm" disabled={Boolean(busy)} onClick={() => void propose()}>{busy === "propose" ? <LoaderCircle className="spin" size={14} /> : "Send to tenant for review"}</Button></div></details>
       </>}
       {escrow.cautionStatus === "DEDUCTION_PROPOSED" && <p className="escrow-settlement-note">The tenant can accept or dispute the proposed deduction. A dispute is sent to an authorized administrator for a recorded decision.</p>}

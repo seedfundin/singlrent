@@ -7,4 +7,9 @@
 .review-opportunities small { color: #77867d; font-size: 10px; }
 .review-opportunities article > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .review-compose { margin-top: 16px; }
-@media (max-width: 650px) { .review-opportunities article { grid-template-columns: 1fr; } .review-opportunities article > div { justify-content: flex-start; } }
+.review-dimensions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.review-dimensions legend { font-size: 11px; color: #55645c; padding: 0 4px; }
+.review-dimensions label { display: grid; gap: 5px; font-size: 11px; color: #4d5d54; }
+.review-received { align-items: start; }
+.review-received > div { display: flex; gap: 8px; align-items: center; }
+@media (max-width: 650px) { .review-opportunities article { grid-template-columns: 1fr; } .review-opportunities article > div { justify-content: flex-start; } .review-dimensions { grid-template-columns: 1fr; } }

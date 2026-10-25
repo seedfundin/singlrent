@@ -11,9 +11,10 @@ import { PayoutsController } from './payouts.controller';
 import { PayoutsService } from './payouts.service';
 import { PayoutAccountsController } from './payout-accounts.controller';
 import { PayoutAccountsService } from './payout-accounts.service';
+import { DocumentsModule } from '../documents/documents.module';
 
 @Module({
-  imports: [FinancialsModule, IntegrationsModule, JobsModule, NotificationsModule, WebsocketModule, UsersModule],
+  imports: [FinancialsModule, IntegrationsModule, JobsModule, NotificationsModule, WebsocketModule, UsersModule, DocumentsModule],
   controllers: [PaymentsController, PayoutsController, PayoutAccountsController],
   providers: [PaymentsService, PayoutsService, PayoutAccountsService],
   exports: [PaymentsService],

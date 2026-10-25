@@ -18,6 +18,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<ApiSession | null>(null);
 
   useEffect(() => {
+    if (!session) return;
+    let disposed = false;
+    let unsubscribe: (() => void) | undefined;
+    let version = 0;
+    const start = () => {
+      const current = ++version;
+      unsubscribe?.(); unsubscribe = undefined;
+      import('@/features/notifications/push-client').then(({ listenForForegroundPush }) => listenForForegroundPush(session.user.id)).then((stop) => {
+        if (disposed || current !== version) stop(); else unsubscribe = stop;
+      }).catch(() => undefined);
+    };
+    start();
+    window.addEventListener('singlerent-push-change', start);
+    return () => { disposed = true; window.removeEventListener('singlerent-push-change', start); unsubscribe?.(); };
+  }, [session?.user.id]);
+
+  useEffect(() => {
     const unsubscribe = sessionStore.subscribe(setSession);
     const stored = sessionStore.get();
     setSession(stored);
@@ -44,6 +61,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     const activeSession = session;
+    if (activeSession) {
+      try {
+        const { disablePush } = await import('@/features/notifications/push-client');
+        await disablePush(activeSession.accessToken, activeSession.user.id);
+      } catch {
+        // Browser payloads never contain private content, even when revocation is offline.
+      }
+    }
     sessionStore.clear();
     router.push(viewPaths.home);
     if (!activeSession) return;

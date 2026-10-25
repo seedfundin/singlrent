@@ -1,0 +1,40 @@
+.tenant-rental-record { display: grid; gap: 16px; margin: 22px 0; padding: clamp(18px, 3vw, 26px); border: 1px solid #cfdfd2; border-radius: 18px; background: linear-gradient(140deg, #f4faf5, #fff 62%); box-shadow: 0 10px 28px #173e2108; }
+.tenant-rental-record-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.tenant-rental-record-heading > span:first-child { display: grid; gap: 5px; }
+.tenant-rental-record-heading small { display: inline-flex; align-items: center; gap: 5px; color: #336d4a; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.tenant-rental-record-heading h2 { margin: 0; color: #173f31; font-size: 23px; letter-spacing: -.04em; }
+.tenant-rental-record-heading p { max-width: 620px; margin: 0; color: #65766d; font-size: 12px; line-height: 1.5; }
+.tenant-rental-record-badge { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; padding: 8px 10px; border-radius: 999px; background: #e8f4e9; color: #286b45; font-size: 11px; font-weight: 700; }
+.tenant-rental-record-error { display: flex; align-items: center; gap: 6px; margin: 0; padding: 10px 12px; border: 1px solid #e8c9c3; border-radius: 10px; color: #8b4438; background: #fff9f8; font-size: 12px; }
+.tenant-rental-record-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.tenant-record-source { display: grid; align-content: start; gap: 13px; min-width: 0; padding: 16px; border: 1px solid #dce8de; border-radius: 14px; background: #fff; }
+.tenant-record-source > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.tenant-record-source > header > span:first-child { display: grid; gap: 3px; }
+.tenant-record-source > header > span:first-child small { color: #728178; font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.tenant-record-source h3 { margin: 0; color: #214334; font-size: 16px; }
+.tenant-record-source p { margin: 0; color: #6b7b71; font-size: 12px; line-height: 1.45; }
+.tenant-record-score { display: grid; flex: 0 0 auto; justify-items: end; gap: 2px; color: #264737; }
+.tenant-record-score b { font-size: 20px; letter-spacing: -.04em; }
+.tenant-record-score small, .tenant-record-neutral { color: #718077; font-size: 10px; }
+.tenant-record-neutral { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; padding: 6px 8px; border-radius: 999px; background: #f2f6f3; }
+.tenant-record-stars { display: inline-flex; gap: 1px; color: #d28e16; }
+.tenant-record-dimensions { display: flex; flex-wrap: wrap; gap: 6px; }
+.tenant-record-dimensions > span { display: grid; gap: 3px; padding: 8px; border-radius: 9px; background: #f2f7f3; }
+.tenant-record-dimensions b { color: #52665a; font-size: 10px; }
+.tenant-record-dimensions small { color: #728178; font-size: 10px; }
+.tenant-record-list { display: grid; gap: 8px; }
+.tenant-record-list article { padding: 11px; border: 1px solid #e3ebe4; border-radius: 10px; }
+.tenant-record-list article > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.tenant-record-list article > header > span:first-child { display: grid; gap: 3px; min-width: 0; }
+.tenant-record-list article > header b { color: #274839; font-size: 12px; }
+.tenant-record-list article > header small { display: inline-flex; align-items: center; gap: 3px; color: #64766b; font-size: 10px; line-height: 1.35; }
+.tenant-record-list article > header > span:last-child { display: inline-flex; align-items: center; gap: 4px; color: #244434; font-size: 11px; }
+.tenant-record-list article > p { margin-top: 8px; color: #506158; font-size: 12px; line-height: 1.55; white-space: pre-line; }
+.tenant-record-empty, .tenant-record-loading { display: flex; align-items: center; gap: 9px; min-height: 74px; padding: 12px; border: 1px dashed #cfddcf; border-radius: 10px; color: #66776d; }
+.tenant-record-empty > span { display: grid; gap: 2px; }
+.tenant-record-empty b { color: #506258; font-size: 12px; }
+.tenant-record-empty small { font-size: 10px; line-height: 1.4; }
+.tenant-record-loading { justify-content: center; font-size: 12px; }
+.tenant-record-more { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tenant-record-more small { color: #728178; font-size: 10px; }
+@media (max-width: 760px) { .tenant-rental-record-heading { display: grid; } .tenant-rental-record-badge { width: fit-content; } .tenant-rental-record-grid { grid-template-columns: 1fr; } }

@@ -26,7 +26,14 @@ export const submitNinSchema = z.object({
   nin: z.string().regex(/^\d{11}$/, 'NIN must contain 11 digits'),
 });
 
-export const publisherVerificationMethodSchema = z.enum(['NIN', 'BVN']);
+export const identityVerificationMethodSchema = z.enum(['NIN', 'BVN']);
+
+export const submitIdentitySchema = z.object({
+  method: identityVerificationMethodSchema,
+  identifier: z.string().regex(/^\d{11}$/, 'NIN or BVN must contain 11 digits'),
+});
+
+export const publisherVerificationMethodSchema = identityVerificationMethodSchema;
 
 export const startPublisherVerificationSchema = z.object({
   method: publisherVerificationMethodSchema,
@@ -42,6 +49,7 @@ export type UpdateProfileRequest = z.infer<typeof updateProfileSchema>;
 export type SendPhoneVerificationRequest = z.infer<typeof sendPhoneVerificationSchema>;
 export type ConfirmPhoneVerificationRequest = z.infer<typeof confirmPhoneVerificationSchema>;
 export type SubmitNinRequest = z.infer<typeof submitNinSchema>;
+export type SubmitIdentityRequest = z.infer<typeof submitIdentitySchema>;
 export type PublisherVerificationMethodRequest = z.infer<typeof publisherVerificationMethodSchema>;
 export type StartPublisherVerificationRequest = z.infer<typeof startPublisherVerificationSchema>;
 export type DojahWidgetWebhookRequest = z.infer<typeof dojahWidgetWebhookSchema>;
