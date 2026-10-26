@@ -8,6 +8,7 @@ import { PropertyAssistant } from "@/features/conversations/property-assistant";
 import { CautionDeposit } from "@/features/rentals/caution-deposit";
 import { IncidentReports } from "@/features/incidents/incident-reports";
 import { NotificationSettings } from "@/features/notifications/notification-settings";
+import { NotificationInboxPage } from "@/features/notifications/notification-inbox";
 import { ReviewsHub } from "@/features/reviews/reviews-hub";
 
 export function PropertyAssistantPage() {
@@ -36,3 +37,4 @@ export function ReviewsPage() { const { go } = useAppNavigation(); return <Revie
 export function ReportsPage() { const { go } = useAppNavigation(); return <IncidentReports go={go} />; }
 export function CautionDepositPage() { const { go } = useAppNavigation(); return <CautionDeposit go={go} />; }
 export function NotificationSettingsPage() { const { go } = useAppNavigation(); return <NotificationSettings go={go} />; }
+export { NotificationInboxPage };

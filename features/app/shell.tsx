@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAppSession } from "@/features/app/app-provider";
+import { useNotificationCenter } from "@/features/notifications/notification-live";
 import type { ApiSession } from "@/lib/api";
 import type { View } from "@/lib/routes";
 
@@ -128,6 +129,16 @@ export function PublicHeader({ go }: { go: Navigate }) {
   );
 }
 
+function NotificationBell({ go, mobile = false }: { go: Navigate; mobile?: boolean }) {
+  const { unreadCount } = useNotificationCenter();
+  const label = unreadCount
+    ? `${unreadCount} unread notification${unreadCount === 1 ? '' : 's'}. Open notifications.`
+    : 'Notifications';
+  const content = <><Bell size={17} />{unreadCount > 0 && <span className="notification-count" aria-hidden="true">{unreadCount > 99 ? '99+' : unreadCount}</span>}<span className="sr-only">{label}</span></>;
+  if (mobile) return <button className="notification-bell mobile-notification-bell" onClick={() => go('notifications')} aria-label={label}>{content}</button>;
+  return <Button variant="ghost" size="icon" className="notification-bell" aria-label={label} onClick={() => go('notifications')}>{content}</Button>;
+}
+
 export function Shell({
   go,
   role = "tenant",
@@ -157,7 +168,7 @@ export function Shell({
         <em>{role} workspace</em>
         <nav>{items.map(([name, view, Icon]) => <button key={String(name)} onClick={() => go(view as View)} className={title === name ? "active" : ""}><Icon size={17} />{name as string}</button>)}</nav>
         <div className="side-bottom">
-          <button onClick={() => go("notifications")}><Settings size={17} /> Settings</button>
+          <button onClick={() => go("notification-settings")}><Settings size={17} /> Settings</button>
           <div className="profile">
             <i>{initials}</i>
             <button className="profile-details" onClick={() => go("profile")} disabled={!session}><b>{displayName}</b><small>{session ? role : "not signed in"}</small></button>
@@ -168,9 +179,9 @@ export function Shell({
       <main>
         <div className="app-head">
           <span>Workspace <ChevronRight size={13} /><b>{title}</b></span>
-          <div><Button variant="ghost" size="icon" aria-label="Notifications" onClick={() => go("notifications")}><Bell size={17} /></Button><Button variant="outline" size="sm"><CalendarDays size={14} /> {new Intl.DateTimeFormat("en-NG", { month: "short", year: "numeric" }).format(new Date())} <ChevronDown size={13} /></Button></div>
+          <div><NotificationBell go={go} /><Button variant="outline" size="sm"><CalendarDays size={14} /> {new Intl.DateTimeFormat("en-NG", { month: "short", year: "numeric" }).format(new Date())} <ChevronDown size={13} /></Button></div>
         </div>
-        <div className="mobile-title"><Brand go={go} /><span>{role} workspace</span><button onClick={() => go("notifications")} aria-label="Notifications"><Bell size={17} /></button></div>
+        <div className="mobile-title"><Brand go={go} /><span>{role} workspace</span><NotificationBell go={go} mobile /></div>
         {children}
         <div className="mobile-nav">
           <button onClick={() => go(role === "tenant" ? "tenant" : role === "landlord" ? "landlord" : role === "agent" ? "agent" : "admin")}><Home size={17} />Home</button>

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, sessionStore, type ApiSession } from "@/lib/api";
 import { viewPaths, type View } from "@/lib/routes";
 import { PushPermissionPrompt } from "@/features/notifications/push-permission-prompt";
+import { NotificationLiveProvider } from "@/features/notifications/notification-live";
 
 type AppSessionContext = {
   session: ApiSession | null;
@@ -83,7 +84,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  return <AppSession.Provider value={{ session, setSession: updateSession, signOut }}><PushPermissionPrompt session={session} />{children}</AppSession.Provider>;
+  return <AppSession.Provider value={{ session, setSession: updateSession, signOut }}><NotificationLiveProvider session={session}><PushPermissionPrompt session={session} />{children}</NotificationLiveProvider></AppSession.Provider>;
 }
 
 export function useAppSession() {

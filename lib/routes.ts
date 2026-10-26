@@ -48,7 +48,8 @@ export const viewPaths = {
   reviews: '/reviews',
   incidents: '/reports',
   deposit: '/caution-deposit',
-  notifications: '/settings/notifications',
+  notifications: '/notifications',
+  'notification-settings': '/settings/notifications',
   profile: '/settings/profile',
   adminops: '/admin/operations',
 } as const;

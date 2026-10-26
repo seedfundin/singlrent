@@ -13,7 +13,7 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   event.waitUntil((async () => {
     const id = event.notification.data?.notificationId;
-    const target = new URL(typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id) ? `/notification-open?id=${encodeURIComponent(id)}` : '/settings/notifications', self.location.origin).href;
+    const target = new URL(typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id) ? `/notification-open?id=${encodeURIComponent(id)}` : '/notifications', self.location.origin).href;
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const client = windows.find((entry) => new URL(entry.url).origin === self.location.origin);
     if (client) { await client.navigate(target); return client.focus(); }
