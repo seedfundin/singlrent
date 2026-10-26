@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { IdentityNameMatchStatus, KycStatus, ListingStatus, PermissionEffect, Prisma, PublisherVerificationStatus, RoleCode, UserStatus } from '@prisma/client';
+import { ConversationType, IdentityNameMatchStatus, KycStatus, ListingStatus, MaintenancePriority, MaintenanceStatus, NotificationType, PermissionEffect, Prisma, PublisherVerificationStatus, RoleCode, UserStatus } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
 import { PasswordService } from '../common/auth/password.service';
 import { AuditService } from '../common/database/audit.service';
@@ -8,6 +8,7 @@ import { pageResult } from '../common/http/pagination';
 import { PrismaService } from '../common/database/prisma.service';
 import { RedisService } from '../common/redis/redis.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ConversationsService } from '../conversations/conversations.service';
 import { UsersService } from '../users/users.service';
 import {
   AcceptAdminInvitationRequest,
@@ -22,6 +23,11 @@ import {
   ReviewPublisherVerificationRequest,
   UpdatePermissionsRequest,
   UpdateUserStatusRequest,
+  AdminMaintenanceContactRequest,
+  AdminMaintenanceEscalationRequest,
+  AdminMaintenanceNoteRequest,
+  AdminMaintenanceOwnerRequest,
+  AdminMaintenanceStatusRequest,
 } from './dto/admin.schemas';
 
 const adminListingInclude = {
@@ -120,8 +126,27 @@ const adminMaintenanceInclude = {
   landlord: { select: { id: true, firstName: true, lastName: true } },
   agent: { select: { id: true, firstName: true, lastName: true } },
   assignedTo: { select: { id: true, firstName: true, lastName: true } },
+  adminOwner: { select: { id: true, firstName: true, lastName: true } },
   _count: { select: { updates: true, attachments: true } },
 } satisfies Prisma.MaintenanceRequestInclude;
+
+const adminMaintenanceCaseInclude = {
+  ...adminMaintenanceInclude,
+  attachments: true,
+  updates: {
+    include: { author: { select: { id: true, firstName: true, lastName: true } } },
+    orderBy: { createdAt: 'asc' as const },
+  },
+} satisfies Prisma.MaintenanceRequestInclude;
+
+type AdminMaintenanceCase = Prisma.MaintenanceRequestGetPayload<{ include: typeof adminMaintenanceCaseInclude }>;
+
+const maintenanceSlaHours: Record<MaintenancePriority, number> = {
+  URGENT: 4,
+  HIGH: 24,
+  MEDIUM: 72,
+  LOW: 168,
+};
 
 @Injectable()
 export class AdminService {
@@ -131,6 +156,7 @@ export class AdminService {
     private readonly passwordService: PasswordService,
     private readonly audit: AuditService,
     private readonly notificationsService: NotificationsService,
+    private readonly conversationsService: ConversationsService,
     private readonly configService: ConfigService,
     private readonly redis: RedisService,
   ) {}
@@ -221,7 +247,42 @@ export class AdminService {
   }
 
   async listMaintenance(query: AdminMaintenanceQuery) {
-    const where: Prisma.MaintenanceRequestWhereInput = { status: query.status };
+    const now = new Date();
+    const activeCase: Prisma.MaintenanceRequestWhereInput = {
+      status: { notIn: [MaintenanceStatus.RESOLVED, MaintenanceStatus.CLOSED] },
+    };
+    const search: Prisma.MaintenanceRequestWhereInput | undefined = query.search
+      ? {
+          OR: [
+            { title: { contains: query.search, mode: 'insensitive' as const } },
+            { description: { contains: query.search, mode: 'insensitive' as const } },
+            { listing: { title: { contains: query.search, mode: 'insensitive' as const } } },
+            { reporter: { firstName: { contains: query.search, mode: 'insensitive' as const } } },
+            { reporter: { lastName: { contains: query.search, mode: 'insensitive' as const } } },
+            { landlord: { firstName: { contains: query.search, mode: 'insensitive' as const } } },
+            { landlord: { lastName: { contains: query.search, mode: 'insensitive' as const } } },
+            { agent: { firstName: { contains: query.search, mode: 'insensitive' as const } } },
+            { agent: { lastName: { contains: query.search, mode: 'insensitive' as const } } },
+          ],
+        }
+      : undefined;
+    const attention: Prisma.MaintenanceRequestWhereInput | undefined = query.attention === 'URGENT'
+      ? { AND: [activeCase, { priority: MaintenancePriority.URGENT }] }
+      : query.attention === 'ESCALATED'
+        ? { AND: [activeCase, { escalatedAt: { not: null } }] }
+        : query.attention === 'UNASSIGNED'
+          ? { AND: [activeCase, { adminOwnerId: null }] }
+          : query.attention === 'OVERDUE'
+            ? { AND: [activeCase, { responseDueAt: { lt: now } }] }
+            : undefined;
+    const clauses: Prisma.MaintenanceRequestWhereInput[] = [];
+    if (search) clauses.push(search);
+    if (attention) clauses.push(attention);
+    const where: Prisma.MaintenanceRequestWhereInput = {
+      status: query.status,
+      priority: query.priority,
+      AND: clauses,
+    };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.maintenanceRequest.findMany({
         where,
@@ -232,7 +293,179 @@ export class AdminService {
       }),
       this.prisma.maintenanceRequest.count({ where }),
     ]);
-    return pageResult(items, total, query);
+    return pageResult(items.map((item) => this.withMaintenanceAttention(item)), total, query);
+  }
+
+  async getMaintenanceCase(requestId: string) {
+    const request = await this.prisma.maintenanceRequest.findUnique({
+      where: { id: requestId },
+      include: adminMaintenanceCaseInclude,
+    });
+    if (!request) throw new NotFoundException('Maintenance request not found');
+    const auditHistory = await this.prisma.auditLog.findMany({
+      where: { entityType: 'maintenance_request', entityId: request.id },
+      include: { actor: { select: { id: true, firstName: true, lastName: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return { ...this.withMaintenanceAttention(request), auditHistory };
+  }
+
+  async listMaintenanceOperators() {
+    return this.prisma.user.findMany({
+      where: {
+        status: UserStatus.ACTIVE,
+        userRoles: { some: { role: { code: { in: [RoleCode.ADMIN, RoleCode.SUPER_ADMIN] } } } },
+      },
+      select: { id: true, firstName: true, lastName: true, email: true },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+    });
+  }
+
+  async assignMaintenanceOwner(actorId: string, requestId: string, input: AdminMaintenanceOwnerRequest) {
+    const request = await this.assertMaintenanceCase(requestId);
+    if (input.ownerId) {
+      const owner = await this.prisma.user.findFirst({
+        where: {
+          id: input.ownerId,
+          status: UserStatus.ACTIVE,
+          userRoles: { some: { role: { code: { in: [RoleCode.ADMIN, RoleCode.SUPER_ADMIN] } } } },
+        },
+        select: { id: true, firstName: true, lastName: true },
+      });
+      if (!owner) throw new BadRequestException('Choose an active SingleRent administrator to own this case');
+    }
+    const saved = await this.prisma.maintenanceRequest.update({
+      where: { id: request.id },
+      data: { adminOwnerId: input.ownerId },
+      include: adminMaintenanceCaseInclude,
+    });
+    await this.audit.record({
+      actorUserId: actorId,
+      action: input.ownerId ? 'maintenance.admin_owner_assigned' : 'maintenance.admin_owner_cleared',
+      entityType: 'maintenance_request',
+      entityId: request.id,
+      metadata: { ownerId: input.ownerId },
+    });
+    return this.withMaintenanceAttention(saved);
+  }
+
+  async addMaintenanceNote(actorId: string, requestId: string, input: AdminMaintenanceNoteRequest) {
+    await this.assertMaintenanceCase(requestId);
+    await this.audit.record({
+      actorUserId: actorId,
+      action: 'maintenance.internal_note_added',
+      entityType: 'maintenance_request',
+      entityId: requestId,
+      metadata: { note: input.note },
+    });
+    return this.getMaintenanceCase(requestId);
+  }
+
+  async escalateMaintenanceCase(actorId: string, requestId: string, input: AdminMaintenanceEscalationRequest) {
+    const request = await this.assertMaintenanceCase(requestId);
+    if (([MaintenanceStatus.RESOLVED, MaintenanceStatus.CLOSED] as MaintenanceStatus[]).includes(request.status)) {
+      throw new ConflictException('Only active maintenance requests can be escalated');
+    }
+    const responseDueAt = input.responseDueAt ? new Date(input.responseDueAt) : null;
+    if (responseDueAt && responseDueAt <= new Date()) throw new BadRequestException('The response deadline must be in the future');
+    const saved = await this.prisma.maintenanceRequest.update({
+      where: { id: request.id },
+      data: { escalatedAt: new Date(), responseDueAt },
+      include: adminMaintenanceCaseInclude,
+    });
+    await this.audit.record({
+      actorUserId: actorId,
+      action: 'maintenance.escalated',
+      entityType: 'maintenance_request',
+      entityId: request.id,
+      metadata: { reason: input.reason, responseDueAt: responseDueAt?.toISOString() ?? null },
+    });
+    const deadline = responseDueAt
+      ? ` Please provide an update by ${new Intl.DateTimeFormat('en-NG', { dateStyle: 'medium', timeStyle: 'short' }).format(responseDueAt)}.`
+      : '';
+    await this.notifyMaintenanceParticipants(request, [request.landlordId, request.agentId], {
+      title: 'Maintenance request escalated',
+      body: `SingleRent support escalated “${request.title}”. ${input.reason}${deadline}`,
+    });
+    return this.withMaintenanceAttention(saved);
+  }
+
+  async contactMaintenanceParticipant(actorId: string, requestId: string, input: AdminMaintenanceContactRequest) {
+    const request = await this.assertMaintenanceCase(requestId);
+    const recipientId = input.recipient === 'TENANT'
+      ? request.reporterId
+      : input.recipient === 'LANDLORD'
+        ? request.landlordId
+        : request.agentId;
+    if (!recipientId) throw new BadRequestException('This case does not have an assigned agent');
+    const supportSubject = `Maintenance support · ${request.title}`.slice(0, 255);
+    const existing = await this.prisma.conversation.findFirst({
+      where: {
+        type: ConversationType.SUPPORT,
+        subject: supportSubject,
+        AND: [
+          { members: { some: { userId: actorId } } },
+          { members: { some: { userId: recipientId } } },
+        ],
+      },
+      select: { id: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+    const conversation = existing
+      ? await this.conversationsService.sendMessage(actorId, existing.id, { body: input.message }).then(() => ({ id: existing.id }))
+      : await this.conversationsService.create(actorId, {
+          type: ConversationType.SUPPORT,
+          recipientId,
+          subject: supportSubject,
+          initialMessage: input.message,
+        });
+    await this.audit.record({
+      actorUserId: actorId,
+      action: 'maintenance.participant_contacted',
+      entityType: 'maintenance_request',
+      entityId: request.id,
+      metadata: { recipient: input.recipient, recipientId, conversationId: conversation.id, message: input.message },
+    });
+    return { conversationId: conversation.id };
+  }
+
+  async correctMaintenanceStatus(actorId: string, requestId: string, input: AdminMaintenanceStatusRequest) {
+    const request = await this.assertMaintenanceCase(requestId);
+    if (request.status === input.status) throw new ConflictException('The case already has this status');
+    const now = new Date();
+    const saved = await this.prisma.$transaction(async (transaction) => {
+      const maintenance = await transaction.maintenanceRequest.update({
+        where: { id: request.id },
+        data: {
+          status: input.status,
+          resolvedAt: input.status === MaintenanceStatus.RESOLVED ? now : ([MaintenanceStatus.OPEN, MaintenanceStatus.ACKNOWLEDGED, MaintenanceStatus.IN_PROGRESS] as MaintenanceStatus[]).includes(input.status) ? null : undefined,
+          closedAt: input.status === MaintenanceStatus.CLOSED ? now : null,
+        },
+        include: adminMaintenanceCaseInclude,
+      });
+      await transaction.maintenanceUpdate.create({
+        data: {
+          maintenanceRequestId: request.id,
+          authorId: actorId,
+          body: `SingleRent support corrected the case status to ${input.status.toLowerCase().replace('_', ' ')}. ${input.reason}`,
+          fromStatus: request.status,
+          toStatus: input.status,
+        },
+      });
+      return maintenance;
+    });
+    await this.audit.record({
+      actorUserId: actorId,
+      action: input.status === MaintenanceStatus.CLOSED ? 'maintenance.closed_by_admin' : 'maintenance.status_corrected',
+      entityType: 'maintenance_request',
+      entityId: request.id,
+      metadata: { fromStatus: request.status, toStatus: input.status, reason: input.reason },
+    });
+    await this.notifyMaintenanceParticipants(request, [request.reporterId, request.landlordId, request.agentId], {
+      title: 'Maintenance request updated',
+      body: `SingleRent support updated “${request.title}” to ${input.status.toLowerCase().replace('_', ' ')}.`,
+    });
+    return this.withMaintenanceAttention(saved);
   }
 
   /** Operational health without exposing credential material or provider secrets. */
@@ -479,6 +712,60 @@ export class AdminService {
       skip: (query.page - 1) * query.pageSize,
       take: query.pageSize,
     });
+  }
+
+  private async assertMaintenanceCase(requestId: string): Promise<AdminMaintenanceCase> {
+    const request = await this.prisma.maintenanceRequest.findUnique({
+      where: { id: requestId },
+      include: adminMaintenanceCaseInclude,
+    });
+    if (!request) throw new NotFoundException('Maintenance request not found');
+    return request;
+  }
+
+  private withMaintenanceAttention<T extends {
+    status: MaintenanceStatus;
+    priority: MaintenancePriority;
+    createdAt: Date;
+    updatedAt: Date;
+    responseDueAt: Date | null;
+    escalatedAt: Date | null;
+    adminOwnerId: string | null;
+  }>(request: T) {
+    const active = !([MaintenanceStatus.RESOLVED, MaintenanceStatus.CLOSED] as MaintenanceStatus[]).includes(request.status);
+    const now = Date.now();
+    const fallbackDeadline = (request.status === MaintenanceStatus.OPEN ? request.createdAt : request.updatedAt).getTime()
+      + maintenanceSlaHours[request.priority] * 60 * 60 * 1000;
+    const overdue = active && (request.responseDueAt ? request.responseDueAt.getTime() < now : fallbackDeadline < now);
+    const urgent = active && request.priority === MaintenancePriority.URGENT;
+    return {
+      ...request,
+      attention: {
+        urgent,
+        overdue,
+        escalated: active && Boolean(request.escalatedAt),
+        unassigned: active && !request.adminOwnerId,
+        needsAttention: urgent || overdue || (active && Boolean(request.escalatedAt)) || (active && !request.adminOwnerId),
+      },
+    };
+  }
+
+  private async notifyMaintenanceParticipants(
+    request: Pick<AdminMaintenanceCase, 'id' | 'listingId' | 'reporterId' | 'landlordId' | 'agentId'>,
+    userIds: Array<string | null | undefined>,
+    notification: { title: string; body: string },
+  ): Promise<void> {
+    await Promise.all(
+      [...new Set(userIds.filter((userId): userId is string => Boolean(userId)))].map((userId) =>
+        this.notificationsService.create({
+          userId,
+          type: NotificationType.MAINTENANCE_UPDATED,
+          title: notification.title,
+          body: notification.body,
+          data: { maintenanceRequestId: request.id, listingId: request.listingId },
+        }),
+      ),
+    );
   }
 
   private hashToken(token: string): string {

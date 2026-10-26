@@ -481,6 +481,7 @@ model User {
   maintenanceForLandlord     MaintenanceRequest[]         @relation("MaintenanceLandlord")
   maintenanceForAgent        MaintenanceRequest[]         @relation("MaintenanceAgent")
   maintenanceAssigned        MaintenanceRequest[]         @relation("MaintenanceAssignee")
+  maintenanceCasesOwned      MaintenanceRequest[]         @relation("MaintenanceAdminOwner")
   maintenanceUpdates         MaintenanceUpdate[]
   conversationMemberships    ConversationMember[]
   messagesSent               Message[]                    @relation("MessageSender")
@@ -1169,6 +1170,7 @@ model MaintenanceRequest {
   landlordId   String                  @db.Uuid
   agentId      String?                 @db.Uuid
   assignedToId String?                 @db.Uuid
+  adminOwnerId String?                 @db.Uuid
   title        String                  @db.VarChar(200)
   category     MaintenanceCategory
   description  String                  @db.Text
@@ -1176,6 +1178,8 @@ model MaintenanceRequest {
   status       MaintenanceStatus       @default(OPEN)
   resolvedAt   DateTime?
   closedAt     DateTime?
+  escalatedAt  DateTime?
+  responseDueAt DateTime?
   createdAt    DateTime                @default(now())
   updatedAt    DateTime                @updatedAt
   listing      Listing                 @relation(fields: [listingId], references: [id], onDelete: Restrict)
@@ -1184,6 +1188,7 @@ model MaintenanceRequest {
   landlord     User                    @relation("MaintenanceLandlord", fields: [landlordId], references: [id], onDelete: Restrict)
   agent        User?                   @relation("MaintenanceAgent", fields: [agentId], references: [id], onDelete: SetNull)
   assignedTo   User?                   @relation("MaintenanceAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  adminOwner   User?                   @relation("MaintenanceAdminOwner", fields: [adminOwnerId], references: [id], onDelete: SetNull)
   updates      MaintenanceUpdate[]
   attachments  MaintenanceAttachment[]
 
@@ -1191,6 +1196,8 @@ model MaintenanceRequest {
   @@index([reporterId, status])
   @@index([landlordId, status])
   @@index([agentId, status])
+  @@index([adminOwnerId, status])
+  @@index([responseDueAt])
   @@map("maintenance_requests")
 }
 

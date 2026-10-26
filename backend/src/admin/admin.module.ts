@@ -4,11 +4,12 @@ import { MediaModule } from '../media/media.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { UsersModule } from '../users/users.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { ConversationsModule } from '../conversations/conversations.module';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 
 @Module({
-  imports: [AuthModule, UsersModule, NotificationsModule, MediaModule, PaymentsModule],
+  imports: [AuthModule, UsersModule, NotificationsModule, MediaModule, PaymentsModule, ConversationsModule],
   controllers: [AdminController],
   providers: [AdminService],
 })

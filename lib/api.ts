@@ -744,10 +744,35 @@ export type ApiMaintenanceRequest = {
   category: string;
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
   status: 'OPEN' | 'ACKNOWLEDGED' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+  resolvedAt?: string | null;
+  closedAt?: string | null;
+  escalatedAt?: string | null;
+  responseDueAt?: string | null;
+  adminOwnerId?: string | null;
   createdAt: string;
   updatedAt: string;
   listing: { id: string; slug: string; title: string };
   reporter: { id: string; firstName: string; lastName: string };
+  landlord?: { id: string; firstName: string; lastName: string };
+  agent?: { id: string; firstName: string; lastName: string } | null;
+  assignedTo?: { id: string; firstName: string; lastName: string } | null;
+  adminOwner?: { id: string; firstName: string; lastName: string } | null;
+  attachments?: Array<{
+    id: string;
+    url: string;
+    publicId: string;
+    format: string | null;
+    bytes: number | null;
+    createdAt: string;
+  }>;
+  attention?: {
+    urgent: boolean;
+    overdue: boolean;
+    escalated: boolean;
+    unassigned: boolean;
+    needsAttention: boolean;
+  };
+  _count?: { updates: number; attachments: number };
   updates: {
     id: string;
     body: string | null;
@@ -756,6 +781,25 @@ export type ApiMaintenanceRequest = {
     createdAt: string;
     author: { id: string; firstName: string; lastName: string };
   }[];
+};
+
+export type ApiMaintenanceAuditEvent = {
+  id: string;
+  action: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+  actor: { id: string; firstName: string; lastName: string } | null;
+};
+
+export type ApiAdminMaintenanceCase = ApiMaintenanceRequest & {
+  auditHistory: ApiMaintenanceAuditEvent[];
+};
+
+export type ApiMaintenanceOperator = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
 };
 
 export type ApiReview = {
@@ -2837,11 +2881,71 @@ export const api = {
         page?: number;
         pageSize?: number;
         status?: ApiMaintenanceRequest['status'];
+        priority?: ApiMaintenanceRequest['priority'];
+        search?: string;
+        attention?: 'URGENT' | 'OVERDUE' | 'ESCALATED' | 'UNASSIGNED';
       } = {},
     ): Promise<PaginatedResponse<ApiMaintenanceRequest>> {
       return request<PaginatedResponse<ApiMaintenanceRequest>>(
         `/admin/maintenance${queryStringFor(query)}`,
         {},
+        token,
+      );
+    },
+    maintenanceCase(token: string, requestId: string): Promise<ApiAdminMaintenanceCase> {
+      return request<ApiAdminMaintenanceCase>(
+        `/admin/maintenance/${encodeURIComponent(requestId)}`,
+        {},
+        token,
+      );
+    },
+    maintenanceOperators(token: string): Promise<ApiMaintenanceOperator[]> {
+      return request<ApiMaintenanceOperator[]>('/admin/maintenance/operators', {}, token);
+    },
+    assignMaintenanceOwner(token: string, requestId: string, ownerId: string | null): Promise<ApiMaintenanceRequest> {
+      return request<ApiMaintenanceRequest>(
+        `/admin/maintenance/${encodeURIComponent(requestId)}/owner`,
+        { method: 'PATCH', body: JSON.stringify({ ownerId }) },
+        token,
+      );
+    },
+    addMaintenanceNote(token: string, requestId: string, note: string): Promise<ApiAdminMaintenanceCase> {
+      return request<ApiAdminMaintenanceCase>(
+        `/admin/maintenance/${encodeURIComponent(requestId)}/notes`,
+        { method: 'POST', body: JSON.stringify({ note }) },
+        token,
+      );
+    },
+    escalateMaintenance(
+      token: string,
+      requestId: string,
+      input: { reason: string; responseDueAt?: string },
+    ): Promise<ApiMaintenanceRequest> {
+      return request<ApiMaintenanceRequest>(
+        `/admin/maintenance/${encodeURIComponent(requestId)}/escalate`,
+        { method: 'POST', body: JSON.stringify(input) },
+        token,
+      );
+    },
+    contactMaintenanceParticipant(
+      token: string,
+      requestId: string,
+      input: { recipient: 'TENANT' | 'LANDLORD' | 'AGENT'; message: string },
+    ): Promise<{ conversationId: string }> {
+      return request<{ conversationId: string }>(
+        `/admin/maintenance/${encodeURIComponent(requestId)}/contact`,
+        { method: 'POST', body: JSON.stringify(input) },
+        token,
+      );
+    },
+    correctMaintenanceStatus(
+      token: string,
+      requestId: string,
+      input: { status: ApiMaintenanceRequest['status']; reason: string },
+    ): Promise<ApiMaintenanceRequest> {
+      return request<ApiMaintenanceRequest>(
+        `/admin/maintenance/${encodeURIComponent(requestId)}/status`,
+        { method: 'PATCH', body: JSON.stringify(input) },
         token,
       );
     },

@@ -33,6 +33,7 @@ export const viewPaths = {
   'admin-conversations': '/admin/conversations',
   'admin-transactions': '/admin/transactions',
   'admin-identity-reviews': '/admin/identity-reviews',
+  'admin-maintenance': '/admin/maintenance',
   escrow: '/admin/escrow',
   states: '/admin/system-states',
   admins: '/admin/admins',

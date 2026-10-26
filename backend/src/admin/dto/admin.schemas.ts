@@ -1,4 +1,4 @@
-import { ListingStatus, MaintenanceStatus, PaymentStatus, PermissionEffect, PermissionKey, RoleCode, UserStatus } from '@prisma/client';
+import { ListingStatus, MaintenancePriority, MaintenanceStatus, PaymentStatus, PermissionEffect, PermissionKey, RoleCode, UserStatus } from '@prisma/client';
 import { z } from 'zod';
 import { paginationQuerySchema } from '../../common/http/pagination';
 
@@ -20,6 +20,23 @@ export const adminTransactionQuerySchema = paginationQuerySchema.extend({
 });
 export const adminMaintenanceQuerySchema = paginationQuerySchema.extend({
   status: z.nativeEnum(MaintenanceStatus).optional(),
+  priority: z.nativeEnum(MaintenancePriority).optional(),
+  search: z.string().trim().min(1).max(200).optional(),
+  attention: z.enum(['URGENT', 'OVERDUE', 'ESCALATED', 'UNASSIGNED']).optional(),
+});
+export const adminMaintenanceNoteSchema = z.object({ note: z.string().trim().min(3).max(4000) });
+export const adminMaintenanceEscalationSchema = z.object({
+  reason: z.string().trim().min(3).max(2000),
+  responseDueAt: z.string().datetime().optional(),
+});
+export const adminMaintenanceOwnerSchema = z.object({ ownerId: z.string().uuid().nullable() });
+export const adminMaintenanceContactSchema = z.object({
+  recipient: z.enum(['TENANT', 'LANDLORD', 'AGENT']),
+  message: z.string().trim().min(3).max(4000),
+});
+export const adminMaintenanceStatusSchema = z.object({
+  status: z.nativeEnum(MaintenanceStatus),
+  reason: z.string().trim().min(3).max(2000),
 });
 export const updateUserStatusSchema = z.object({ status: z.nativeEnum(UserStatus) });
 export const assignRoleSchema = z.object({ role: z.nativeEnum(RoleCode) });
@@ -68,6 +85,11 @@ export type AdminUserQuery = z.infer<typeof adminUserQuerySchema>;
 export type AdminListingQuery = z.infer<typeof adminListingQuerySchema>;
 export type AdminTransactionQuery = z.infer<typeof adminTransactionQuerySchema>;
 export type AdminMaintenanceQuery = z.infer<typeof adminMaintenanceQuerySchema>;
+export type AdminMaintenanceNoteRequest = z.infer<typeof adminMaintenanceNoteSchema>;
+export type AdminMaintenanceEscalationRequest = z.infer<typeof adminMaintenanceEscalationSchema>;
+export type AdminMaintenanceOwnerRequest = z.infer<typeof adminMaintenanceOwnerSchema>;
+export type AdminMaintenanceContactRequest = z.infer<typeof adminMaintenanceContactSchema>;
+export type AdminMaintenanceStatusRequest = z.infer<typeof adminMaintenanceStatusSchema>;
 export type UpdateUserStatusRequest = z.infer<typeof updateUserStatusSchema>;
 export type AssignRoleRequest = z.infer<typeof assignRoleSchema>;
 export type UpdatePermissionsRequest = z.infer<typeof updatePermissionsSchema>;

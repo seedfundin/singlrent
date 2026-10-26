@@ -25,6 +25,16 @@ import {
   adminTransactionQuerySchema,
   AdminMaintenanceQuery,
   adminMaintenanceQuerySchema,
+  AdminMaintenanceContactRequest,
+  adminMaintenanceContactSchema,
+  AdminMaintenanceEscalationRequest,
+  adminMaintenanceEscalationSchema,
+  AdminMaintenanceNoteRequest,
+  adminMaintenanceNoteSchema,
+  AdminMaintenanceOwnerRequest,
+  adminMaintenanceOwnerSchema,
+  AdminMaintenanceStatusRequest,
+  adminMaintenanceStatusSchema,
   AdminUserQuery,
   adminUserQuerySchema,
   AdminRefundRequest,
@@ -153,6 +163,68 @@ export class AdminController {
     @Query(new ZodValidationPipe(adminMaintenanceQuerySchema)) query: AdminMaintenanceQuery,
   ) {
     return this.adminService.listMaintenance(query);
+  }
+
+  @Get('maintenance/operators')
+  @RequirePermissions(PermissionKey.MAINTENANCE_MANAGE)
+  maintenanceOperators() {
+    return this.adminService.listMaintenanceOperators();
+  }
+
+  @Get('maintenance/:requestId')
+  @RequirePermissions(PermissionKey.MAINTENANCE_MANAGE)
+  maintenanceCase(@Param('requestId') requestId: string) {
+    return this.adminService.getMaintenanceCase(requestId);
+  }
+
+  @Patch('maintenance/:requestId/owner')
+  @RequirePermissions(PermissionKey.MAINTENANCE_MANAGE)
+  assignMaintenanceOwner(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('requestId') requestId: string,
+    @Body(new ZodValidationPipe(adminMaintenanceOwnerSchema)) input: AdminMaintenanceOwnerRequest,
+  ) {
+    return this.adminService.assignMaintenanceOwner(user.userId, requestId, input);
+  }
+
+  @Post('maintenance/:requestId/notes')
+  @RequirePermissions(PermissionKey.MAINTENANCE_MANAGE)
+  addMaintenanceNote(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('requestId') requestId: string,
+    @Body(new ZodValidationPipe(adminMaintenanceNoteSchema)) input: AdminMaintenanceNoteRequest,
+  ) {
+    return this.adminService.addMaintenanceNote(user.userId, requestId, input);
+  }
+
+  @Post('maintenance/:requestId/escalate')
+  @RequirePermissions(PermissionKey.MAINTENANCE_MANAGE)
+  escalateMaintenanceCase(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('requestId') requestId: string,
+    @Body(new ZodValidationPipe(adminMaintenanceEscalationSchema)) input: AdminMaintenanceEscalationRequest,
+  ) {
+    return this.adminService.escalateMaintenanceCase(user.userId, requestId, input);
+  }
+
+  @Post('maintenance/:requestId/contact')
+  @RequirePermissions(PermissionKey.MAINTENANCE_MANAGE)
+  contactMaintenanceParticipant(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('requestId') requestId: string,
+    @Body(new ZodValidationPipe(adminMaintenanceContactSchema)) input: AdminMaintenanceContactRequest,
+  ) {
+    return this.adminService.contactMaintenanceParticipant(user.userId, requestId, input);
+  }
+
+  @Patch('maintenance/:requestId/status')
+  @RequirePermissions(PermissionKey.MAINTENANCE_MANAGE)
+  correctMaintenanceStatus(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('requestId') requestId: string,
+    @Body(new ZodValidationPipe(adminMaintenanceStatusSchema)) input: AdminMaintenanceStatusRequest,
+  ) {
+    return this.adminService.correctMaintenanceStatus(user.userId, requestId, input);
   }
 
   @Get("system-states")
