@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useAppSession } from '@/features/app/app-provider';
+import { requestPushPermissionPrompt } from '@/features/notifications/push-client';
 import { api, type InspectionAvailability, type InspectionBooking, type InspectionSlot, type InspectionWindow } from '@/lib/api';
 import './inspections.css';
 
@@ -45,6 +46,7 @@ export function InspectionRequest({ listingId, onSignIn }: { listingId: string; 
       const booking = await api.inspections.book(session.accessToken, listingId, requestMode || !slots?.length ? toUtc(proposed, timezone) : selected, requestMode || !slots?.length ? 'REQUEST' : 'SLOT');
       setMessage(booking.status === 'CONFIRMED' ? 'Your inspection has been confirmed.' : 'Inspection request sent. Awaiting confirmation.');
       setOpen(false); setSelected(''); setProposed(''); await load();
+      requestPushPermissionPrompt('inspection');
     } catch (e) { const message = errorMessage(e); await load(); setError(message); } finally { setBusy(false); }
   };
   return <section className="inspection-panel"><Button variant="outline" disabled={slots === null} onClick={() => { setOpen(!open); setRequestMode(!slots?.length); }}>{slots?.length ? 'Schedule Inspection' : 'Request Inspection'}</Button>{slots === null && <small>{error || 'Checking inspection availability…'} {error && <button type="button" onClick={() => void load()}>Try again</button>}</small>}{message && <p role="status">{message}</p>}{error && slots !== null && <p role="alert">{error}</p>}{open && slots !== null && <div className="inspection-form"><p>Times are shown in {timezone}.</p>{!requestMode && slots.length > 0 ? <><label>Available date and time<select value={selected} onChange={(e) => setSelected(e.target.value)}><option value="">Select a time</option>{slots.map((slot) => <option key={slot.startsAt} value={slot.startsAt}>{display(slot.startsAt, timezone)}</option>)}</select></label><button type="button" onClick={() => setRequestMode(true)}>Request another date</button></> : <><p>{slots.length ? 'Propose another date for the host to approve.' : 'No inspection dates are currently available. Propose a date for the host to approve.'}</p><label>Preferred date and time<input type="datetime-local" value={proposed} onChange={(e) => setProposed(e.target.value)} /></label>{slots.length > 0 && <button type="button" onClick={() => setRequestMode(false)}>Choose an available slot</button>}</>}<Button disabled={busy || (requestMode || !slots.length ? !proposed : !selected)} onClick={() => void submit()}>{busy ? 'Submitting…' : 'Send inspection request'}</Button></div>}</section>;

@@ -39,6 +39,7 @@ import {
 } from '@/lib/api';
 import { formatNaira } from '@/lib/pricing';
 import { ApplicationStatusBadge } from '@/features/rentals/rental-status';
+import { requestPushPermissionPrompt } from '@/features/notifications/push-client';
 import './rental-flow.css';
 
 const pendingPaymentStorageKey = 'singlerent.pending-payment';
@@ -1413,6 +1414,7 @@ export function PaymentCallback({ go }: { go: Navigate }) {
           window.sessionStorage.removeItem(pendingPaymentStorageKey);
           setState('success');
           setMessage('Payment confirmed and held securely.');
+          requestPushPermissionPrompt('payment');
           go('confirmation', { payment: pending.paymentId });
         }
       } catch (cause) {

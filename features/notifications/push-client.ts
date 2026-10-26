@@ -17,8 +17,62 @@ const config = {
 const vapidKey = process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY;
 const webVapidKey = process.env.NEXT_PUBLIC_WEB_PUSH_VAPID_KEY;
 const deviceKey = 'singlerent.push.device';
+export const pushPromptEvent = 'singlerent-push-prompt';
 
 type StoredPushDevice = { id: string; userId: string; provider?: 'WEB_PUSH' };
+export type PushPromptReason = 'sign_in' | 'inspection' | 'payment';
+
+function firebaseIsConfigured() {
+  return Object.values(config).every(Boolean) && !!vapidKey;
+}
+
+function browserCanReceivePush() {
+  return (
+    typeof window !== 'undefined' &&
+    'Notification' in window &&
+    'serviceWorker' in navigator
+  );
+}
+
+function readStoredDevice(): StoredPushDevice | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const raw = localStorage.getItem(deviceKey);
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as StoredPushDevice;
+    if (!parsed.id || !parsed.userId) throw new Error('Invalid push device');
+    return parsed;
+  } catch {
+    localStorage.removeItem(deviceKey);
+    return undefined;
+  }
+}
+
+function assertAvailableConfiguration() {
+  if (!firebaseIsConfigured() && !webVapidKey) {
+    throw new Error('Browser notifications have not been configured yet.');
+  }
+  if (!browserCanReceivePush()) {
+    throw new Error('This browser does not support web notifications.');
+  }
+}
+
+/** Whether it is appropriate to offer the browser's native permission prompt. */
+export function canOfferPushPermission() {
+  return (
+    browserCanReceivePush() &&
+    (firebaseIsConfigured() || !!webVapidKey) &&
+    Notification.permission === 'default'
+  );
+}
+
+/** Ask the in-app prompt to appear after a useful, user-initiated milestone. */
+export function requestPushPermissionPrompt(reason: PushPromptReason) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent<PushPromptReason>(pushPromptEvent, { detail: reason }),
+  );
+}
 
 async function registerWebPushFallback(
   accessToken: string,
@@ -73,8 +127,12 @@ async function registerWebPushFallback(
   window.dispatchEvent(new Event('singlerent-push-change'));
 }
 
-export async function enablePush(accessToken: string, userId: string) {
-  const firebaseConfigured = Object.values(config).every(Boolean) && !!vapidKey;
+async function registerPushDevice(
+  accessToken: string,
+  userId: string,
+  previousDevice?: StoredPushDevice,
+) {
+  const firebaseConfigured = firebaseIsConfigured();
   if (process.env.NODE_ENV !== 'production') {
     console.info('[SingleRent] Firebase client configuration', {
       apiKeyConfigured: Boolean(config.apiKey),
@@ -85,24 +143,6 @@ export async function enablePush(accessToken: string, userId: string) {
       webPushFallbackConfigured: Boolean(webVapidKey),
     });
   }
-  if (!firebaseConfigured && !webVapidKey)
-    throw new Error('Browser notifications have not been configured yet.');
-  if (!('Notification' in window) || !('serviceWorker' in navigator))
-    throw new Error('This browser does not support web notifications.');
-  const previous = localStorage.getItem(deviceKey);
-  let previousDevice: StoredPushDevice | undefined;
-  if (previous) {
-    previousDevice = JSON.parse(previous) as StoredPushDevice;
-    if (previousDevice.userId !== userId)
-      throw new Error(
-        'This browser is still registered to another account. Sign in to that account and disable notifications first.',
-      );
-  }
-  const permission = await Notification.requestPermission();
-  if (permission !== 'granted')
-    throw new Error(
-      'Notifications are not enabled. Check your browser settings if you want to allow them.',
-    );
   const firebaseSupported =
     firebaseConfigured && (await isSupported().catch(() => false));
   if (!firebaseSupported) {
@@ -150,10 +190,55 @@ export async function enablePush(accessToken: string, userId: string) {
   }
 }
 
+export async function enablePush(accessToken: string, userId: string) {
+  assertAvailableConfiguration();
+  const previousDevice = readStoredDevice();
+  if (previousDevice && previousDevice.userId !== userId) {
+    throw new Error(
+      'This browser is still registered to another account. Sign in to that account and disable notifications first.',
+    );
+  }
+  const permission =
+    Notification.permission === 'granted'
+      ? 'granted'
+      : await Notification.requestPermission();
+  if (permission !== 'granted') {
+    throw new Error(
+      'Notifications are not enabled. Check your browser settings if you want to allow them.',
+    );
+  }
+  await registerPushDevice(accessToken, userId, previousDevice);
+}
+
+/**
+ * Restore a browser that has already granted permission. This never opens a
+ * browser permission dialog and intentionally will not transfer a device
+ * registration from one SingleRent account to another.
+ */
+export async function reconnectPush(accessToken: string, userId: string) {
+  if (
+    !browserCanReceivePush() ||
+    (!firebaseIsConfigured() && !webVapidKey) ||
+    Notification.permission !== 'granted'
+  ) {
+    return false;
+  }
+  const previousDevice = readStoredDevice();
+  if (previousDevice && previousDevice.userId !== userId) return false;
+  try {
+    await registerPushDevice(accessToken, userId, previousDevice);
+    return true;
+  } catch (error) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn('[SingleRent] Could not reconnect browser notifications.', error);
+    }
+    return false;
+  }
+}
+
 export async function disablePush(accessToken: string, userId: string) {
-  const raw = localStorage.getItem(deviceKey);
-  if (!raw) return;
-  const device = JSON.parse(raw) as StoredPushDevice;
+  const device = readStoredDevice();
+  if (!device) return;
   if (device.userId !== userId) return;
   await api.notifications.removeDevice(accessToken, device.id);
   if (device.provider === 'WEB_PUSH' && 'serviceWorker' in navigator) {
@@ -171,10 +256,9 @@ export async function disablePush(accessToken: string, userId: string) {
 export async function listenForForegroundPush(
   userId: string,
 ): Promise<() => void> {
-  const raw = localStorage.getItem(deviceKey);
-  if (!raw || !Object.values(config).every(Boolean) || !(await isSupported()))
+  const stored = readStoredDevice();
+  if (!stored || !Object.values(config).every(Boolean) || !(await isSupported()))
     return () => undefined;
-  const stored = JSON.parse(raw) as { userId: string; provider?: string };
   if (stored.userId !== userId || stored.provider === 'WEB_PUSH')
     return () => undefined;
   const app =

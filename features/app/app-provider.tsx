@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { useRouter } from "next/navigation";
 import { api, sessionStore, type ApiSession } from "@/lib/api";
 import { viewPaths, type View } from "@/lib/routes";
+import { PushPermissionPrompt } from "@/features/notifications/push-permission-prompt";
 
 type AppSessionContext = {
   session: ApiSession | null;
@@ -29,10 +30,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (disposed || current !== version) stop(); else unsubscribe = stop;
       }).catch(() => undefined);
     };
-    start();
+    void import('@/features/notifications/push-client')
+      .then(({ reconnectPush }) => reconnectPush(session.accessToken, session.user.id))
+      .catch(() => false)
+      .finally(start);
     window.addEventListener('singlerent-push-change', start);
     return () => { disposed = true; window.removeEventListener('singlerent-push-change', start); unsubscribe?.(); };
-  }, [session?.user.id]);
+  }, [session?.accessToken, session?.user.id]);
 
   useEffect(() => {
     const unsubscribe = sessionStore.subscribe(setSession);
@@ -79,7 +83,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  return <AppSession.Provider value={{ session, setSession: updateSession, signOut }}>{children}</AppSession.Provider>;
+  return <AppSession.Provider value={{ session, setSession: updateSession, signOut }}><PushPermissionPrompt session={session} />{children}</AppSession.Provider>;
 }
 
 export function useAppSession() {
