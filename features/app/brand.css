@@ -1,0 +1,40 @@
+.brand,
+.auth-mark {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.brand-logo {
+  display: block;
+  width: 138px;
+  height: auto;
+}
+
+.auth-logo {
+  display: block;
+  width: 148px;
+  height: auto;
+}
+
+.shell > aside .brand .brand-logo {
+  width: 150px;
+}
+
+.site-footer .brand {
+  padding: 5px 7px;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.site-footer .brand .brand-logo {
+  width: 150px;
+}
+
+@media (max-width: 600px) {
+  .mobile-title .brand .brand-logo {
+    width: 118px;
+  }
+}

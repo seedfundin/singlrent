@@ -11,7 +11,6 @@ import {
   FileText,
   Heart,
   Home,
-  House,
   LayoutDashboard,
   LogOut,
   MapPin,
@@ -29,14 +28,14 @@ import { useAppSession } from "@/features/app/app-provider";
 import { useNotificationCenter } from "@/features/notifications/notification-live";
 import type { ApiSession } from "@/lib/api";
 import type { View } from "@/lib/routes";
+import "./brand.css";
 
 export type Navigate = (view: View, query?: Record<string, string>) => void;
 
 export function Brand({ go }: { go: Navigate }) {
   return (
     <button className="brand" onClick={() => go("home")} aria-label="SingleRent home">
-      <i><House size={17} /></i>
-      <b>Single<span>Rent</span></b>
+      <img className="brand-logo" src="/singlerent-logo-horizontal.png" alt="SingleRent" />
     </button>
   );
 }

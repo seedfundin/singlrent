@@ -10,7 +10,6 @@ import {
   CircleCheck,
   CircleX,
   Clock3,
-  House,
   KeyRound,
   LoaderCircle,
   ShieldCheck,
@@ -21,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import type { AccountRole } from '@/lib/account';
 import type { View } from '@/lib/routes';
 import { api, ApiError, type ApiSession, type NinVerificationResult, registrationDraftStore, sessionStore } from '@/lib/api';
+import '@/features/app/brand.css';
 import './auth.css';
 import './auth-overrides.css';
 
@@ -113,12 +113,7 @@ function AuthMark({ go }: { go: (view: View) => void }) {
       onClick={() => go('home')}
       aria-label="Go to SingleRent home"
     >
-      <i>
-        <House size={18} />
-      </i>
-      <b>
-        Single<span>Rent</span>
-      </b>
+      <img className="auth-logo" src="/singlerent-logo-horizontal.png" alt="SingleRent" />
     </button>
   );
 }
