@@ -1,8 +1,8 @@
-# Email verification and transactional NIN checks
+# Phone verification and transactional NIN checks
 
-Registration creates an account and an authenticated session, then issues a six-digit email OTP. In development, the response from `POST /api/v1/auth/register` and `POST /api/v1/auth/email-verification/resend` includes `emailVerification.developmentCode`. Production must connect an email-delivery provider before this code is exposed to customers.
+Registration requires a phone number and creates an authenticated session, then issues a six-digit SMS OTP. Email is optional at registration. In development, the response from `POST /api/v1/auth/register` and `POST /api/v1/auth/phone-verification` includes `phoneVerification.developmentCode`. Production must configure Termii before a customer can complete account verification.
 
-Confirm the code with `POST /api/v1/auth/email-verification`. An unverified account can browse and sign in, but cannot start payment, identity verification, or a payout withdrawal.
+Confirm the code with `POST /api/v1/auth/phone-verification/confirm`. An unverified account can browse and sign in, but cannot start payment, identity verification, or a payout withdrawal.
 
 NIN is deliberately not collected during registration. A verified NIN is reused forever for that user unless the product later adds an explicit re-verification policy.
 
@@ -25,7 +25,7 @@ This keeps every paid provider request, success, rejection, and provider failure
 
 ## Landlord and agent: before creating a listing
 
-Landlords and agents can register, verify their email, and use their workspace normally. Before they can create a listing or submit an existing draft for review, they must complete a separate **publisher verification**. This is not charged through the tenant's transactional KYC flow.
+Landlords and agents can register, verify their phone number, and use their workspace normally. Before they can create a listing or submit an existing draft for review, they must complete a separate **publisher verification**. This is not charged through the tenant's transactional KYC flow.
 
 1. Configure a published Dojah **EasyOnboard** flow which offers **both NIN and BVN** government-data checks and includes the **Liveness** fraud check.
 2. Add `NEXT_PUBLIC_DOJAH_APP_ID`, `NEXT_PUBLIC_DOJAH_PUBLIC_KEY`, and `NEXT_PUBLIC_DOJAH_PUBLISHER_WIDGET_ID` to the frontend environment. These three values are safe to use in the browser; never put a Dojah secret there.

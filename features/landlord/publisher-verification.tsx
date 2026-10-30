@@ -13,7 +13,7 @@ type DojahConnectOptions = {
   type: "custom";
   config: { widget_id: string };
   reference_id: string;
-  user_data: { first_name: string; last_name: string; email: string; residence_country: "NG" };
+  user_data: { first_name: string; last_name: string; email?: string; residence_country: "NG" };
   gov_data: { nin: string; bvn: string };
   metadata: Record<string, string>;
   onSuccess: (data: unknown) => void;
@@ -158,7 +158,7 @@ export function PublisherVerificationGate({
         user_data: {
           first_name: session.user.firstName,
           last_name: session.user.lastName,
-          email: session.user.email,
+          ...(session.user.email ? { email: session.user.email } : {}),
           residence_country: "NG",
         },
         // The person enters the chosen number only inside Dojah's secure flow.

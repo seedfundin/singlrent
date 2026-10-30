@@ -21,6 +21,7 @@ function roleFor(roles: string[]): WorkspaceRole {
 type Form = {
   firstName: string;
   lastName: string;
+  email: string;
   bio: string;
   occupation: string;
   defaultOccupants: string;
@@ -33,6 +34,7 @@ function formFrom(profile: ApiUserProfile): Form {
   return {
     firstName: profile.firstName,
     lastName: profile.lastName,
+    email: profile.email ?? "",
     bio: profile.bio ?? "",
     occupation: profile.tenantProfile?.occupation ?? "",
     defaultOccupants: String(profile.tenantProfile?.defaultOccupants ?? 1),
@@ -105,6 +107,7 @@ export function ProfileSettings({ go }: { go: Navigate }) {
       const saved = await api.users.updateProfile(session.accessToken, {
         firstName: form.firstName.trim(),
         lastName: form.lastName.trim(),
+        email: form.email.trim() || null,
         bio: form.bio.trim() || null,
         occupation: profile.tenantProfile ? form.occupation.trim() || null : undefined,
         defaultOccupants: profile.tenantProfile ? defaultOccupants : undefined,
@@ -114,7 +117,7 @@ export function ProfileSettings({ go }: { go: Navigate }) {
       }) as ApiUserProfile;
       setProfile(saved);
       setForm(formFrom(saved));
-      setSession({ ...session, user: { ...session.user, firstName: saved.firstName, lastName: saved.lastName } });
+      setSession({ ...session, user: { ...session.user, firstName: saved.firstName, lastName: saved.lastName, email: saved.email } });
       setNotice("Your profile has been saved.");
     } catch (cause) {
       const nextFieldErrors = apiFieldErrors(cause);
@@ -154,7 +157,7 @@ export function ProfileSettings({ go }: { go: Navigate }) {
     {loading ? <section className="rental-empty"><LoaderCircle className="spin" size={24} /><h1>Loading your profile…</h1></section> : form && profile ? <section className="panel live-data-form">
       <div className="subhead"><span><small>Personal details</small><h2>Profile information</h2></span></div>
       <div className="live-form-grid"><label>First name<input aria-invalid={Boolean(fieldErrors.firstName)} value={form.firstName} maxLength={100} required onChange={(event) => update("firstName", event.target.value)} /><ApiFieldError errors={fieldErrors} field="firstName" /></label><label>Last name<input aria-invalid={Boolean(fieldErrors.lastName)} value={form.lastName} maxLength={100} required onChange={(event) => update("lastName", event.target.value)} /><ApiFieldError errors={fieldErrors} field="lastName" /></label></div>
-      <label>Email<input value={profile.email} disabled /></label>
+      <label>Contact email <small>(optional)</small><input aria-invalid={Boolean(fieldErrors.email)} type="email" autoComplete="email" value={form.email} maxLength={320} onChange={(event) => update("email", event.target.value)} placeholder="you@example.com" /><small>Add an email before paying, so a payment receipt can be issued.</small><ApiFieldError errors={fieldErrors} field="email" /></label>
       <label>About you<textarea aria-invalid={Boolean(fieldErrors.bio)} value={form.bio} maxLength={1000} onChange={(event) => update("bio", event.target.value)} placeholder="Add a short profile description" /><ApiFieldError errors={fieldErrors} field="bio" /></label>
       {profile.tenantProfile && <><label>Occupation<input aria-invalid={Boolean(fieldErrors.occupation)} value={form.occupation} maxLength={150} onChange={(event) => update("occupation", event.target.value)} /><ApiFieldError errors={fieldErrors} field="occupation" /></label><label>Default occupants<input aria-invalid={Boolean(fieldErrors.defaultOccupants)} type="number" min="1" max="20" value={form.defaultOccupants} onChange={(event) => update("defaultOccupants", event.target.value)} /><ApiFieldError errors={fieldErrors} field="defaultOccupants" /></label></>}
       {profile.landlordProfile && <label>Business name<input aria-invalid={Boolean(fieldErrors.businessName)} value={form.businessName} maxLength={200} onChange={(event) => update("businessName", event.target.value)} /><ApiFieldError errors={fieldErrors} field="businessName" /></label>}

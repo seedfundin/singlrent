@@ -8,9 +8,9 @@ Before enabling: verify all event coverage, improve remaining detailed links, an
 
 Backend environment names (do not commit actual values): `PUSH_NOTIFICATIONS_ENABLED`, `PUSH_DEVICE_ENCRYPTION_KEY` (at least 32 characters; retain securely because rotating it prevents decryption of registered devices), `FIREBASE_SERVER_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY`, and `WEB_PUSH_VAPID_SUBJECT`. Browser build variables are listed in the root `.env.example`. Firebase web configuration is public; service-account credentials, Web Push private key, and the device-encryption key must remain on the backend.
 
-An unavailable push provider must not affect email OTP. iOS web push requires a supported Home Screen web app. No Firebase hosting, database, authentication, or Cloud Functions are used.
+An unavailable push provider must not affect SMS OTP. iOS web push requires a supported Home Screen web app. No Firebase hosting, database, authentication, or Cloud Functions are used.
 
-OTP challenges issued by the updated backend use a keyed hash and existing 10-minute expiry; unexpired legacy challenges remain accepted. Resend is limited per account for email verification and per IP for reset and verification endpoints. The existing throttler is process-local, so distributed deployments need shared rate-limiting before claiming cluster-wide brute-force protection. Changing the JWT signing secret also invalidates outstanding keyed OTPs.
+SMS OTP challenges use a 10-minute expiry; public reset and verification endpoints are rate limited. The existing throttler is process-local, so distributed deployments need shared rate-limiting before claiming cluster-wide brute-force protection. Changing the JWT signing secret also invalidates outstanding password-reset OTPs.
 
 ## Safe rollout checklist
 

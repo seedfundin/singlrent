@@ -21,3 +21,68 @@
   color: #2d4a3f;
   background: #fff;
 }
+
+.google-identity-button {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 4px;
+}
+
+.google-identity-button > div {
+  width: 100%;
+}
+
+.google-signup-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.google-signup-actions > [data-slot='button'] {
+  justify-self: start;
+  font-size: 10px;
+}
+
+.invitation-note {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 0;
+  color: #65776e;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.invitation-note svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: #287953;
+}
+
+.invitation-success {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid #cfe7d5;
+  border-radius: 10px;
+  background: #f0f9f2;
+}
+
+.invitation-success > i {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  color: #287953;
+  background: #dff2e4;
+}
+
+.invitation-success p {
+  margin: 0;
+  color: #52695e;
+  font-size: 12px;
+  line-height: 1.55;
+}

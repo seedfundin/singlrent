@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
 export const updateProfileSchema = z.object({
+  email: z.preprocess(
+    (value) => (typeof value === 'string' && !value.trim() ? null : value),
+    z.string().trim().email().max(320).transform((value) => value.toLowerCase()).nullable().optional(),
+  ),
   firstName: z.string().trim().min(1).max(100).optional(),
   lastName: z.string().trim().min(1).max(100).optional(),
   bio: z.string().trim().max(1000).nullable().optional(),

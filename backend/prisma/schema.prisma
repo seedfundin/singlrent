@@ -435,7 +435,7 @@ enum ReceiptKind {
 
 model User {
   id                         String                       @id @default(uuid()) @db.Uuid
-  email                      String                       @unique @db.VarChar(320)
+  email                      String?                      @unique @db.VarChar(320)
   firstName                  String                       @db.VarChar(100)
   lastName                   String                       @db.VarChar(100)
   passwordHash               String?                      @db.VarChar(255)
@@ -672,8 +672,9 @@ model EmailVerificationChallenge {
   @@map("email_verification_challenges")
 }
 
-// Reset OTPs are distinct from email-verification OTPs. A password reset must
-// never silently verify an email address or invalidate its verification state.
+// This legacy table is retained so an older deployed database can be migrated
+// safely. New authentication OTPs use PhoneVerificationChallenge instead.
+// Password resets never verify or change a contact email address.
 model PasswordResetChallenge {
   id          String    @id @default(uuid()) @db.Uuid
   userId      String    @db.Uuid

@@ -1,9 +1,10 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ConversationType, IdentityNameMatchStatus, KycStatus, ListingStatus, MaintenancePriority, MaintenanceStatus, NotificationType, PermissionEffect, Prisma, PublisherVerificationStatus, RoleCode, UserStatus } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
 import { PasswordService } from '../common/auth/password.service';
 import { AuditService } from '../common/database/audit.service';
+import { EmailDeliveryService } from '../common/email/email-delivery.service';
 import { pageResult } from '../common/http/pagination';
 import { PrismaService } from '../common/database/prisma.service';
 import { RedisService } from '../common/redis/redis.service';
@@ -159,6 +160,7 @@ export class AdminService {
     private readonly conversationsService: ConversationsService,
     private readonly configService: ConfigService,
     private readonly redis: RedisService,
+    private readonly emailDelivery: EmailDeliveryService,
   ) {}
 
   async notificationActivity() {
@@ -544,6 +546,10 @@ export class AdminService {
   }
 
   async createInvitation(actorId: string, input: CreateAdminInvitationRequest) {
+    const existingUser = await this.prisma.user.findUnique({ where: { email: input.email }, select: { id: true } });
+    if (existingUser) {
+      throw new ConflictException("This email already belongs to a SingleRent account. Update that account's role instead.");
+    }
     const rawToken = randomBytes(32).toString('base64url');
     const invitation = await this.prisma.adminInvitation.upsert({
       where: { email: input.email },
@@ -567,11 +573,16 @@ export class AdminService {
       },
       select: { id: true, email: true, role: true, adminTitle: true, expiresAt: true },
     });
+    const delivery = await this.emailDelivery.adminInvitation(invitation.email, {
+      invitationUrl: this.adminInvitationUrl(rawToken),
+      role: invitation.role === RoleCode.SUPER_ADMIN ? 'Super Admin' : 'Admin',
+      expiresAt: invitation.expiresAt,
+    });
+    if (!delivery.delivered) {
+      throw new ServiceUnavailableException('The invitation could not be sent because email delivery is not configured. Configure email delivery and try again.');
+    }
     await this.audit.record({ actorUserId: actorId, action: 'admin.invitation_created', entityType: 'admin_invitation', entityId: invitation.id, metadata: { email: invitation.email, role: invitation.role } });
-    return {
-      ...invitation,
-      ...(this.configService.get<string>('NODE_ENV') === 'development' ? { developmentInviteToken: rawToken } : {}),
-    };
+    return invitation;
   }
 
   async acceptInvitation(input: AcceptAdminInvitationRequest) {
@@ -591,8 +602,26 @@ export class AdminService {
       passwordHash,
       role: invitation.role,
     });
-    await this.prisma.adminInvitation.update({ where: { id: invitation.id }, data: { acceptedByUserId: user.id, acceptedAt: new Date() } });
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } }),
+      this.prisma.adminInvitation.update({ where: { id: invitation.id }, data: { acceptedByUserId: user.id, acceptedAt: new Date() } }),
+    ]);
     return { id: user.id, email: user.email, role: invitation.role };
+  }
+
+  private adminInvitationUrl(token: string): string {
+    const configuredOrigin = this.configService.get<string>('FRONTEND_URL')
+      ?? this.configService.getOrThrow<string>('CORS_ORIGIN').split(',')[0]?.trim();
+    if (!configuredOrigin) {
+      throw new ServiceUnavailableException('A frontend URL must be configured before administrator invitations can be sent');
+    }
+    try {
+      const invitationUrl = new URL('/admin/accept-invitation', configuredOrigin);
+      invitationUrl.searchParams.set('token', token);
+      return invitationUrl.toString();
+    } catch {
+      throw new ServiceUnavailableException('The configured frontend URL is not valid for administrator invitations');
+    }
   }
 
   async reviewKyc(actorId: string, userId: string, input: ReviewKycRequest) {

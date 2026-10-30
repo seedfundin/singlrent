@@ -21,6 +21,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
     const user = await this.usersService.findByIdOrThrow(payload.sub);
     await this.usersService.assertCanAuthenticate(user);
-    return { userId: user.id, email: user.email };
+    return { userId: user.id, email: user.email ?? undefined };
   }
 }

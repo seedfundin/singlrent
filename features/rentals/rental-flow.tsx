@@ -450,8 +450,8 @@ export function RentalApplicationFlow({ go }: { go: Navigate }) {
                       <section className="rental-form-card">
                         <h2>Your rental details</h2>
                         <p>
-                          Your name and email are taken from your signed-in
-                          account.
+                          Your name and contact details are taken from your
+                          signed-in account.
                         </p>
                         <div className="rental-readonly">
                           <span>
@@ -461,8 +461,8 @@ export function RentalApplicationFlow({ go }: { go: Navigate }) {
                             </b>
                           </span>
                           <span>
-                            <small>Email</small>
-                            <b>{session.user.email}</b>
+                            <small>Contact email</small>
+                            <b>{session.user.email ?? 'Not added yet'}</b>
                           </span>
                         </div>
                         {formError && (

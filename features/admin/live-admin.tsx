@@ -553,7 +553,7 @@ function LiveAdminManagementContent({ go }: { go: Go }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"ADMIN" | "SUPER_ADMIN">("ADMIN");
   const [title, setTitle] = useState("");
-  const [inviteToken, setInviteToken] = useState<string | null>(null);
+  const [inviteMessage, setInviteMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -575,10 +575,10 @@ function LiveAdminManagementContent({ go }: { go: Go }) {
     if (!token || !email.trim()) return;
     setSaving(true);
     setError(null);
-    setInviteToken(null);
+    setInviteMessage(null);
     try {
       const invitation = await api.admin.createInvitation(token, { email: email.trim(), role, adminTitle: title.trim() || undefined });
-      setInviteToken(invitation.developmentInviteToken ?? null);
+      setInviteMessage(`An invitation was emailed to ${invitation.email}. It expires on ${displayDate(invitation.expiresAt)}.`);
       setEmail("");
       setTitle("");
       setShowInvite(false);
@@ -608,7 +608,7 @@ function LiveAdminManagementContent({ go }: { go: Go }) {
   return <Shell go={go} role="admin" title="Admin management"><div className="page live-admin-page">
     <div className="page-title"><span><small>Live account administration</small><h1>Admin management</h1><p>Invite administrators, review their account state, and configure direct permissions.</p></span>{isSuperAdmin ? <Button onClick={() => setShowInvite(true)}><Plus size={14} /> Add admin</Button> : <Status tone="gold"><ShieldCheck size={12} /> Super Admin only</Status>}</div>
     <ErrorMessage message={error} />
-    {inviteToken && <section className="admin-development-token"><KeyRound size={16} /><span><b>Development invitation token</b><code>{inviteToken}</code><small>Only shown locally. Give it to the invited admin to complete registration.</small></span></section>}
+    {inviteMessage && <section className="admin-invitation-sent" role="status"><Check size={16} /><span><b>Invitation sent</b><small>{inviteMessage}</small></span></section>}
     {showInvite && <section className="panel admin-invite-form"><div className="subhead"><span><small>Super Admin action</small><h2>Invite an administrator</h2></span><Button variant="ghost" size="icon-sm" onClick={() => setShowInvite(false)}><X size={15} /></Button></div><div className="formgrid"><label>Work email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@company.com" /></label><label>Admin title<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Operations Admin" /></label><label>Platform role<select value={role} onChange={(event) => setRole(event.target.value as "ADMIN" | "SUPER_ADMIN")}><option value="ADMIN">Admin</option><option value="SUPER_ADMIN">Super Admin</option></select></label></div><div className="actions"><Button variant="ghost" onClick={() => setShowInvite(false)}>Cancel</Button><Button disabled={saving || !email.trim()} onClick={() => void invite()}>{saving ? "Creating…" : "Create invitation"} <ArrowRight size={14} /></Button></div></section>}
     <div className="admin-live-management"><section className="panel admins-table"><div className="subhead"><span><small>Live accounts</small><h2>Administrators</h2></span><span>{loading ? "Loading…" : `${admins.length} account${admins.length === 1 ? "" : "s"}`}</span></div><div className="admin-thead"><span>Admin</span><span>Role</span><span>Status</span><span>Last active</span><span>Permission summary</span></div>{loading ? <div className="admin-live-loading"><LoaderCircle size={17} /> Loading administrator accounts…</div> : admins.length ? admins.map((admin) => <button className={`admin-person ${selected?.id === admin.id ? "selected" : ""}`} key={admin.id} onClick={() => setSelectedId(admin.id)}><span><i>{initials(admin.firstName, admin.lastName)}</i><b>{admin.firstName} {admin.lastName}<small>{admin.email}</small></b></span><Status tone={userIsSuperAdmin(admin) ? "gold" : "slate"}>{roleLabel(admin)}</Status><Status tone={admin.status === "ACTIVE" ? "green" : "red"}>{admin.status.toLowerCase()}</Status><small>{displayDate(admin.lastActiveAt)}</small><small>{admin.directPermissions.length ? `${admin.directPermissions.length} direct rule${admin.directPermissions.length === 1 ? "" : "s"}` : "Role defaults"}</small><ArrowRight size={14} /></button>) : error ? <div className="admin-live-empty"><CircleAlert size={18} /> Administrator accounts could not be loaded.</div> : <div className="admin-live-empty"><Users size={18} /> No administrator accounts are available.</div>}</section>
     {selected && <aside className="panel admin-live-profile"><span className="admin-profile-avatar">{initials(selected.firstName, selected.lastName)}</span><Status tone={userIsSuperAdmin(selected) ? "gold" : "slate"}>{roleLabel(selected)}</Status><h2>{selected.firstName} {selected.lastName}</h2><p>{selected.email}</p><dl><div><dt>Account status</dt><dd>{selected.status.toLowerCase()}</dd></div><div><dt>Last active</dt><dd>{displayDate(selected.lastActiveAt)}</dd></div><div><dt>Direct permissions</dt><dd>{selected.directPermissions.length}</dd></div></dl>{isSuperAdmin && <div className="admin-profile-actions"><Button variant="outline" onClick={() => go("permissions")}>Edit permissions</Button><Button variant={selected.status === "ACTIVE" ? "destructive" : "outline"} disabled={saving} onClick={() => void changeStatus(selected.status === "ACTIVE" ? "DEACTIVATED" : "ACTIVE")}>{selected.status === "ACTIVE" ? "Deactivate" : "Reactivate"}</Button></div>}</aside>}</div>

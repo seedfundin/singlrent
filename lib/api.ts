@@ -76,13 +76,14 @@ export type ApiSession = {
   refreshToken: string;
   user: {
     id: string;
-    email: string;
+    email: string | null;
+    phone: string | null;
     firstName: string;
     lastName: string;
     roles: ApiRole[];
-    emailVerified: boolean;
+    phoneVerified: boolean;
   };
-  emailVerification?: {
+  phoneVerification?: {
     id: string;
     expiresAt: string;
     developmentCode?: string;
@@ -91,7 +92,7 @@ export type ApiSession = {
 
 export type ApiUserProfile = {
   id: string;
-  email: string;
+  email: string | null;
   firstName: string;
   lastName: string;
   phone: string | null;
@@ -1371,6 +1372,7 @@ export type RegistrationDraft = {
   firstName: string;
   lastName: string;
   email: string;
+  phone: string;
   password: string;
   confirmPassword: string;
   dateOfBirth?: string;
@@ -1397,8 +1399,19 @@ export const registrationDraftStore = {
 
 export const api = {
   auth: {
-    login(input: { email: string; password: string }): Promise<ApiSession> {
+    login(input: { identifier: string; password: string }): Promise<ApiSession> {
       return request<ApiSession>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      });
+    },
+    google(input: {
+      idToken: string;
+      phone?: string;
+      role: 'TENANT' | 'LANDLORD' | 'AGENT';
+      dateOfBirth?: string;
+    }): Promise<ApiSession> {
+      return request<ApiSession>('/auth/google', {
         method: 'POST',
         body: JSON.stringify(input),
       });
@@ -1411,25 +1424,26 @@ export const api = {
         body: JSON.stringify(input),
       });
     },
-    confirmEmailVerification(
+    confirmPhoneVerification(
       token: string,
       challengeId: string,
       code: string,
     ): Promise<{ verified: true }> {
       return request<{ verified: true }>(
-        '/auth/email-verification',
+        '/auth/phone-verification/confirm',
         { method: 'POST', body: JSON.stringify({ challengeId, code }) },
         token,
       );
     },
-    resendEmailVerification(
+    issuePhoneVerification(
       token: string,
+      phone?: string,
     ): Promise<{ id: string; expiresAt: string; developmentCode?: string }> {
       return request<{
         id: string;
         expiresAt: string;
         developmentCode?: string;
-      }>('/auth/email-verification/resend', { method: 'POST' }, token);
+      }>('/auth/phone-verification', { method: 'POST', body: JSON.stringify(phone ? { phone } : {}) }, token);
     },
     me(token: string): Promise<ApiSession['user']> {
       return request<ApiSession['user']>('/auth/me', {}, token);
@@ -1443,7 +1457,7 @@ export const api = {
       );
     },
     requestPasswordReset(
-      email: string,
+      phone: string,
     ): Promise<{
       requested: true;
       challengeId?: string;
@@ -1451,11 +1465,11 @@ export const api = {
     }> {
       return request('/auth/password-reset/request', {
         method: 'POST',
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ phone }),
       });
     },
     confirmPasswordReset(input: {
-      email: string;
+      phone: string;
       challengeId: string;
       code: string;
       password: string;
@@ -2812,6 +2826,18 @@ export const api = {
     },
   },
   admin: {
+    acceptInvitation(input: {
+      token: string;
+      firstName: string;
+      lastName: string;
+      password: string;
+      confirmPassword: string;
+    }): Promise<{ id: string; email: string; role: 'ADMIN' | 'SUPER_ADMIN' }> {
+      return request<{ id: string; email: string; role: 'ADMIN' | 'SUPER_ADMIN' }>(
+        '/admin/invitations/accept',
+        { method: 'POST', body: JSON.stringify(input) },
+      );
+    },
     notificationActivity(
       token: string,
     ): Promise<{
@@ -3024,7 +3050,6 @@ export const api = {
       role: ApiRole;
       adminTitle: string | null;
       expiresAt: string;
-      developmentInviteToken?: string;
     }> {
       return request<{
         id: string;
@@ -3032,7 +3057,6 @@ export const api = {
         role: ApiRole;
         adminTitle: string | null;
         expiresAt: string;
-        developmentInviteToken?: string;
       }>(
         `/admin/invitations`,
         { method: 'POST', body: JSON.stringify(input) },

@@ -48,12 +48,11 @@
 .admin-review-actions, .admin-profile-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 12px; }
 .admin-review-actions [data-slot=button], .admin-profile-actions [data-slot=button] { font-size: 9px; }
 .admin-readonly-note { margin: 0; padding: 10px; border-radius: 7px; color: #718076; background: #f5f7f5; font-size: 9px; line-height: 1.45; }
-.admin-development-token { display: flex; gap: 9px; margin-bottom: 13px; padding: 12px; border: 1px solid #ead9a7; border-radius: 8px; color: #715712; background: #fffaea; }
-.admin-development-token > svg { flex: 0 0 auto; margin-top: 2px; }
-.admin-development-token span { display: grid; gap: 3px; min-width: 0; }
-.admin-development-token b { font-size: 10px; }
-.admin-development-token code { overflow-wrap: anywhere; color: #5c4a12; font-size: 9px; }
-.admin-development-token small { color: #887735; font-size: 8px; }
+.admin-invitation-sent { display: flex; gap: 9px; margin-bottom: 13px; padding: 12px; border: 1px solid #cce6d3; border-radius: 8px; color: #276c4d; background: #f1faf3; }
+.admin-invitation-sent > svg { flex: 0 0 auto; margin-top: 2px; }
+.admin-invitation-sent span { display: grid; gap: 3px; min-width: 0; }
+.admin-invitation-sent b { font-size: 10px; }
+.admin-invitation-sent small { color: #5d7c6b; font-size: 9px; }
 .admin-invite-form { margin-bottom: 13px; padding: 17px; }
 .admin-invite-form .subhead { margin-top: 0; }
 .admin-invite-form .subhead [data-slot=button] { padding: 0; color: #7e8c84; }

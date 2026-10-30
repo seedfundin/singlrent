@@ -17,9 +17,9 @@ export default function NotificationOpenPage() {
       window.location.replace('/sign-in');
       return;
     }
-    if (!session.user.emailVerified) {
+    if (!session.user.phoneVerified) {
       sessionStorage.setItem('singlerent.notification.open', id);
-      window.location.replace('/verify-email');
+      window.location.replace('/verify-phone');
       return;
     }
     let active = true;

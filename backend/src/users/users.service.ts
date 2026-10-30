@@ -1,6 +1,19 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { KycStatus, Prisma, PublisherVerificationStatus, RoleCode, User, UserStatus } from '@prisma/client';
-import { PrismaService } from '../common/database/prisma.service';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from "@nestjs/common";
+import {
+  KycStatus,
+  Prisma,
+  PublisherVerificationStatus,
+  RoleCode,
+  User,
+  UserStatus,
+} from "@prisma/client";
+import { PrismaService } from "../common/database/prisma.service";
 
 export type UserWithRoles = Prisma.UserGetPayload<{
   include: { userRoles: { include: { role: true } } };
@@ -17,16 +30,24 @@ export class UsersService {
     });
   }
 
+  findByPhone(phone: string): Promise<UserWithRoles | null> {
+    return this.prisma.user.findUnique({
+      where: { phone: this.normalizePhone(phone) },
+      include: { userRoles: { include: { role: true } } },
+    });
+  }
+
   async findByIdOrThrow(userId: string): Promise<User> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException("User not found");
     }
     return user;
   }
 
   async createLocalUser(input: {
-    email: string;
+    email?: string | null;
+    phone?: string | null;
     firstName: string;
     lastName: string;
     passwordHash?: string;
@@ -36,7 +57,8 @@ export class UsersService {
     return this.prisma.$transaction(async (transaction) => {
       const user = await transaction.user.create({
         data: {
-          email: this.normalizeEmail(input.email),
+          email: input.email ? this.normalizeEmail(input.email) : null,
+          phone: input.phone ? this.normalizePhone(input.phone) : null,
           firstName: input.firstName.trim(),
           lastName: input.lastName.trim(),
           passwordHash: input.passwordHash,
@@ -56,7 +78,9 @@ export class UsersService {
         await transaction.landlordProfile.create({ data: { userId: user.id } });
       }
       if (input.role === RoleCode.AGENT) {
-        await transaction.agentProfile.create({ data: { userId: user.id, dateOfBirth: input.dateOfBirth } });
+        await transaction.agentProfile.create({
+          data: { userId: user.id, dateOfBirth: input.dateOfBirth },
+        });
       }
       return user;
     });
@@ -69,23 +93,31 @@ export class UsersService {
     });
   }
 
-  async assertCanAuthenticate(user: Pick<User, 'status'>): Promise<void> {
+  async assertCanAuthenticate(user: Pick<User, "status">): Promise<void> {
     if (user.status !== UserStatus.ACTIVE) {
-      throw new UnauthorizedException('This account is not active');
+      throw new UnauthorizedException("This account is not active");
     }
   }
 
   async deactivate(userId: string): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
-      await transaction.user.update({ where: { id: userId }, data: { status: UserStatus.DEACTIVATED } });
-      await transaction.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+      await transaction.user.update({
+        where: { id: userId },
+        data: { status: UserStatus.DEACTIVATED },
+      });
+      await transaction.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
     });
   }
 
-  async assertEmailVerified(userId: string): Promise<void> {
+  async assertPhoneVerified(userId: string): Promise<void> {
     const user = await this.findByIdOrThrow(userId);
-    if (!user.emailVerifiedAt) {
-      throw new ForbiddenException('Verify your email address before continuing');
+    if (!user.phoneVerifiedAt) {
+      throw new ForbiddenException(
+        "Verify your phone number before continuing",
+      );
     }
   }
 
@@ -101,7 +133,7 @@ export class UsersService {
       },
     });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException("User not found");
     }
     return user;
   }
@@ -111,6 +143,7 @@ export class UsersService {
     input: {
       firstName?: string;
       lastName?: string;
+      email?: string | null;
       bio?: string | null;
       profileImageUrl?: string | null;
       profileImagePublicId?: string | null;
@@ -121,68 +154,110 @@ export class UsersService {
       licenceNumber?: string | null;
     },
   ) {
-    return this.prisma.$transaction(async (transaction) => {
-      const current = await transaction.user.findUnique({
-        where: { id: userId },
-        select: {
-          firstName: true,
-          lastName: true,
-          kyc: { select: { status: true } },
-          publisherVerification: { select: { status: true } },
-        },
-      });
-      if (!current) throw new NotFoundException('User not found');
-      const changingLegalName = (input.firstName !== undefined && input.firstName.trim() !== current.firstName)
-        || (input.lastName !== undefined && input.lastName.trim() !== current.lastName);
-      const identityAlreadyVerified = current.kyc?.status === KycStatus.VERIFIED
-        || current.publisherVerification?.status === PublisherVerificationStatus.VERIFIED;
-      if (changingLegalName && identityAlreadyVerified) {
-        throw new ConflictException('Your legal name cannot be changed after identity verification. Contact SingleRent support if it needs correction.');
-      }
-      await transaction.user.update({
-        where: { id: userId },
-        data: {
-          firstName: input.firstName?.trim(),
-          lastName: input.lastName?.trim(),
-          bio: input.bio,
-          profileImageUrl: input.profileImageUrl,
-          profileImagePublicId: input.profileImagePublicId,
-        },
-      });
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        const current = await transaction.user.findUnique({
+          where: { id: userId },
+          select: {
+            firstName: true,
+            lastName: true,
+            kyc: { select: { status: true } },
+            publisherVerification: { select: { status: true } },
+          },
+        });
+        if (!current) throw new NotFoundException("User not found");
+        const changingLegalName =
+          (input.firstName !== undefined &&
+            input.firstName.trim() !== current.firstName) ||
+          (input.lastName !== undefined &&
+            input.lastName.trim() !== current.lastName);
+        const identityAlreadyVerified =
+          current.kyc?.status === KycStatus.VERIFIED ||
+          current.publisherVerification?.status ===
+            PublisherVerificationStatus.VERIFIED;
+        if (changingLegalName && identityAlreadyVerified) {
+          throw new ConflictException(
+            "Your legal name cannot be changed after identity verification. Contact SingleRent support if it needs correction.",
+          );
+        }
+        await transaction.user.update({
+          where: { id: userId },
+          data: {
+            firstName: input.firstName?.trim(),
+            lastName: input.lastName?.trim(),
+            email:
+              input.email === undefined
+                ? undefined
+                : input.email
+                  ? this.normalizeEmail(input.email)
+                  : null,
+            bio: input.bio,
+            profileImageUrl: input.profileImageUrl,
+            profileImagePublicId: input.profileImagePublicId,
+          },
+        });
 
-      if (input.occupation !== undefined || input.defaultOccupants !== undefined) {
-        await transaction.tenantProfile.upsert({
-          where: { userId },
-          create: {
-            userId,
-            occupation: input.occupation,
-            defaultOccupants: input.defaultOccupants ?? 1,
-          },
-          update: {
-            occupation: input.occupation,
-            defaultOccupants: input.defaultOccupants,
-          },
-        });
+        if (
+          input.occupation !== undefined ||
+          input.defaultOccupants !== undefined
+        ) {
+          await transaction.tenantProfile.upsert({
+            where: { userId },
+            create: {
+              userId,
+              occupation: input.occupation,
+              defaultOccupants: input.defaultOccupants ?? 1,
+            },
+            update: {
+              occupation: input.occupation,
+              defaultOccupants: input.defaultOccupants,
+            },
+          });
+        }
+        if (input.businessName !== undefined) {
+          await transaction.landlordProfile.upsert({
+            where: { userId },
+            create: { userId, businessName: input.businessName },
+            update: { businessName: input.businessName },
+          });
+        }
+        if (
+          input.companyName !== undefined ||
+          input.licenceNumber !== undefined
+        ) {
+          await transaction.agentProfile.upsert({
+            where: { userId },
+            create: {
+              userId,
+              companyName: input.companyName,
+              licenceNumber: input.licenceNumber,
+            },
+            update: {
+              companyName: input.companyName,
+              licenceNumber: input.licenceNumber,
+            },
+          });
+        }
+        return this.getProfile(userId);
+      });
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        throw new ConflictException(
+          "Another SingleRent account already uses that email address",
+        );
       }
-      if (input.businessName !== undefined) {
-        await transaction.landlordProfile.upsert({
-          where: { userId },
-          create: { userId, businessName: input.businessName },
-          update: { businessName: input.businessName },
-        });
-      }
-      if (input.companyName !== undefined || input.licenceNumber !== undefined) {
-        await transaction.agentProfile.upsert({
-          where: { userId },
-          create: { userId, companyName: input.companyName, licenceNumber: input.licenceNumber },
-          update: { companyName: input.companyName, licenceNumber: input.licenceNumber },
-        });
-      }
-      return this.getProfile(userId);
-    });
+      throw error;
+    }
   }
 
   private normalizeEmail(email: string): string {
     return email.trim().toLowerCase();
+  }
+
+  private normalizePhone(phone: string): string {
+    return phone.trim();
   }
 }

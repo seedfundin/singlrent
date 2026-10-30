@@ -11,8 +11,7 @@ export type EmailMessage = {
 /**
  * A deliberately small provider boundary. Resend is only contacted when it is
  * explicitly configured; local and review environments safely record why
- * delivery was skipped without ever returning a one-time code to production
- * clients or logs.
+ * delivery was skipped. Authentication codes are delivered only by SMS.
  */
 @Injectable()
 export class EmailDeliveryService {
@@ -51,12 +50,28 @@ export class EmailDeliveryService {
     return { delivered: true, providerId };
   }
 
-  verificationCode(to: string, code: string) {
-    return this.send(this.otpMessage(to, 'Verify your SingleRent email', 'Use this code to verify your SingleRent email address', code));
-  }
-
-  passwordResetCode(to: string, code: string) {
-    return this.send(this.otpMessage(to, 'Reset your SingleRent password', 'Use this code to reset your SingleRent password', code));
+  adminInvitation(
+    to: string,
+    input: { invitationUrl: string; role: 'Admin' | 'Super Admin'; expiresAt: Date },
+  ) {
+    const safeUrl = escapeHtml(input.invitationUrl);
+    const expiry = new Intl.DateTimeFormat('en-NG', {
+      dateStyle: 'long',
+      timeStyle: 'short',
+      timeZone: 'Africa/Lagos',
+    }).format(input.expiresAt);
+    return this.send({
+      to,
+      subject: 'You have been invited to join SingleRent',
+      text: [
+        `You have been invited to join SingleRent as a ${input.role}.`,
+        '',
+        `Accept your invitation: ${input.invitationUrl}`,
+        '',
+        `This secure invitation expires on ${expiry} (Nigeria time). If you were not expecting it, you can ignore this email.`,
+      ].join('\n'),
+      html: `<main style="font-family:Arial,sans-serif;color:#163f35;max-width:560px;margin:0 auto;padding:24px"><h1 style="margin:0 0 16px">You are invited to SingleRent</h1><p>You have been invited to join SingleRent as a <strong>${input.role}</strong>.</p><p style="margin:28px 0"><a href="${safeUrl}" style="display:inline-block;padding:12px 18px;border-radius:8px;background:#1d6a4d;color:#fff;text-decoration:none;font-weight:700">Accept invitation</a></p><p>If the button does not open, copy this link into your browser:</p><p style="overflow-wrap:anywhere"><a href="${safeUrl}">${safeUrl}</a></p><p style="color:#61746b">This secure invitation expires on ${escapeHtml(expiry)} (Nigeria time). If you were not expecting it, you can ignore this email.</p></main>`,
+    });
   }
 
   notification(to: string, title: string, body: string) {
@@ -68,16 +83,6 @@ export class EmailDeliveryService {
       text: `${title}\n\n${body}`,
       html: `<main><h1>${safeTitle}</h1><p>${safeBody}</p></main>`,
     });
-  }
-
-  private otpMessage(to: string, subject: string, intro: string, code: string): EmailMessage {
-    const safeIntro = escapeHtml(intro);
-    return {
-      to,
-      subject,
-      text: `${intro}: ${code}. It expires in 10 minutes. If you did not request this, you can ignore this email.`,
-      html: `<main><h1>${safeIntro}</h1><p>Your one-time code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:4px">${code}</p><p>This code expires in 10 minutes. If you did not request this, you can ignore this email.</p></main>`,
-    };
   }
 
   private redact(email: string): string {

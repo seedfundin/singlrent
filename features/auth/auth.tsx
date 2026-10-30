@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -12,6 +12,7 @@ import {
   Clock3,
   House,
   KeyRound,
+  LoaderCircle,
   ShieldCheck,
   UserRound,
   type LucideIcon,
@@ -43,6 +44,67 @@ const roleCopy: Record<
     destination: 'agent',
   },
 };
+
+type GoogleCredentialResponse = { credential?: string };
+type GoogleButtonText = 'continue_with' | 'signup_with';
+
+type GoogleIdentityApi = {
+  initialize(configuration: {
+    client_id: string;
+    callback: (response: GoogleCredentialResponse) => void;
+    auto_select?: boolean;
+    cancel_on_tap_outside?: boolean;
+  }): void;
+  renderButton(
+    parent: HTMLElement,
+    options: {
+      type: 'standard';
+      theme: 'outline';
+      size: 'large';
+      text: GoogleButtonText;
+      shape: 'rectangular';
+      width: number;
+    },
+  ): void;
+};
+
+declare global {
+  interface Window {
+    google?: { accounts?: { id?: GoogleIdentityApi } };
+  }
+}
+
+let googleIdentityScript: Promise<GoogleIdentityApi> | null = null;
+
+function loadGoogleIdentityServices(): Promise<GoogleIdentityApi> {
+  if (typeof window === 'undefined') return Promise.reject(new Error('Google sign-in is only available in a browser.'));
+  const existingApi = window.google?.accounts?.id;
+  if (existingApi) return Promise.resolve(existingApi);
+  if (googleIdentityScript) return googleIdentityScript;
+
+  googleIdentityScript = new Promise((resolve, reject) => {
+    const resolveGoogle = () => {
+      const api = window.google?.accounts?.id;
+      if (api) resolve(api);
+      else reject(new Error('Google sign-in did not load correctly.'));
+    };
+    const existingScript = document.querySelector<HTMLScriptElement>('script[data-singlerent-google-identity]');
+    if (existingScript) {
+      existingScript.addEventListener('load', resolveGoogle, { once: true });
+      existingScript.addEventListener('error', () => reject(new Error('Google sign-in could not be loaded.')), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.dataset.singlerentGoogleIdentity = 'true';
+    script.addEventListener('load', resolveGoogle, { once: true });
+    script.addEventListener('error', () => reject(new Error('Google sign-in could not be loaded.')), { once: true });
+    document.head.appendChild(script);
+  });
+  return googleIdentityScript;
+}
 
 function AuthMark({ go }: { go: (view: View) => void }) {
   return (
@@ -108,22 +170,72 @@ function AuthLayout({
 
 function GoogleButton({
   label,
-  onClick,
+  text,
+  disabled = false,
+  onCredential,
+  onError,
 }: {
   label: string;
-  onClick: () => void;
+  text: GoogleButtonText;
+  disabled?: boolean;
+  onCredential: (idToken: string) => void;
+  onError: (message: string) => void;
 }) {
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      className="google-button"
-      onClick={onClick}
-    >
-      <i>G</i>
-      {label}
-    </Button>
-  );
+  const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID?.trim();
+  const buttonContainer = useRef<HTMLDivElement>(null);
+  const onCredentialRef = useRef(onCredential);
+  const onErrorRef = useRef(onError);
+
+  useEffect(() => {
+    onCredentialRef.current = onCredential;
+    onErrorRef.current = onError;
+  }, [onCredential, onError]);
+
+  useEffect(() => {
+    if (!clientId || disabled || !buttonContainer.current) return;
+    let active = true;
+    void loadGoogleIdentityServices()
+      .then((google) => {
+        if (!active || !buttonContainer.current) return;
+        google.initialize({
+          client_id: clientId,
+          auto_select: false,
+          cancel_on_tap_outside: true,
+          callback: (response) => {
+            const idToken = response.credential;
+            if (!idToken) {
+              onErrorRef.current('Google did not return a sign-in credential. Please try again.');
+              return;
+            }
+            onCredentialRef.current(idToken);
+          },
+        });
+        const container = buttonContainer.current;
+        container.replaceChildren();
+        google.renderButton(container, {
+          type: 'standard',
+          theme: 'outline',
+          size: 'large',
+          text,
+          shape: 'rectangular',
+          width: Math.max(250, Math.min(400, Math.floor(container.getBoundingClientRect().width))),
+        });
+      })
+      .catch(() => {
+        if (active) onErrorRef.current('Google sign-in could not be loaded. Please try again.');
+      });
+    return () => {
+      active = false;
+    };
+  }, [clientId, disabled, text]);
+
+  if (!clientId) {
+    return <Button type="button" variant="outline" className="google-button" onClick={() => onError('Google sign-in is not configured yet. Please try another sign-in method.')}><i>G</i>{label}</Button>;
+  }
+  if (disabled) {
+    return <Button type="button" variant="outline" className="google-button" disabled><i>G</i>{label}</Button>;
+  }
+  return <div className="google-identity-button" ref={buttonContainer} aria-label={label} />;
 }
 
 export function SignIn({
@@ -134,23 +246,35 @@ export function SignIn({
   onAuthenticated: (session: ApiSession) => void;
 }) {
   const [showPassword, setShowPassword] = useState(false);
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [resetStage, setResetStage] = useState<'login' | 'request' | 'confirm'>('login');
-  const [resetEmail, setResetEmail] = useState('');
+  const [resetPhone, setResetPhone] = useState('');
   const [resetChallengeId, setResetChallengeId] = useState('');
   const [resetCode, setResetCode] = useState('');
   const [resetPassword, setResetPassword] = useState('');
   const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const signInWithGoogle = async (idToken: string) => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const session = await api.auth.google({ idToken, role: 'TENANT' });
+      onAuthenticated(session);
+    } catch (cause: unknown) {
+      setError(cause instanceof ApiError ? cause.message : 'Unable to sign in with Google right now.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setSubmitting(true);
     setError(null);
     try {
-      const session = await api.auth.login({ email, password });
+      const session = await api.auth.login({ identifier, password });
       onAuthenticated(session);
     } catch (cause: unknown) {
       setError(cause instanceof ApiError ? cause.message : 'Unable to sign in right now.');
@@ -163,9 +287,9 @@ export function SignIn({
     setSubmitting(true);
     setError(null);
     try {
-      const result = await api.auth.requestPasswordReset(resetEmail);
+      const result = await api.auth.requestPasswordReset(resetPhone);
       setResetChallengeId(result.challengeId ?? '');
-      setNotice('If that email belongs to an account, a six-digit reset code has been sent.');
+      setNotice('If that phone number belongs to an account, a six-digit reset code has been sent.');
       setResetStage('confirm');
       if (result.developmentCode) setResetCode(result.developmentCode);
     } catch (cause: unknown) {
@@ -183,7 +307,7 @@ export function SignIn({
     setSubmitting(true);
     setError(null);
     try {
-      await api.auth.confirmPasswordReset({ email: resetEmail, challengeId: resetChallengeId, code: resetCode, password: resetPassword, confirmPassword: resetConfirmPassword });
+      await api.auth.confirmPasswordReset({ phone: resetPhone, challengeId: resetChallengeId, code: resetCode, password: resetPassword, confirmPassword: resetConfirmPassword });
       setResetStage('login');
       setPassword('');
       setNotice('Your password has been reset. Sign in with your new password.');
@@ -193,33 +317,33 @@ export function SignIn({
       setSubmitting(false);
     }
   };
-  if (resetStage === 'request') return <AuthLayout go={go} eyebrow="Account recovery" title="Reset your password" copy="Enter your email and we will send a six-digit code if an account exists.">
-    <form className="auth-form" onSubmit={requestReset}><label>Email address<input type="email" autoComplete="email" value={resetEmail} onChange={(event) => setResetEmail(event.target.value)} required /></label>{error && <p className="auth-error" role="alert">{error}</p>}<Button className="auth-submit" type="submit" disabled={submitting}>{submitting ? 'Sending…' : 'Send reset code'} <ArrowRight size={15} /></Button><p className="auth-switch"><button type="button" onClick={() => { setResetStage('login'); setError(null); }}>Back to sign in</button></p></form>
+  if (resetStage === 'request') return <AuthLayout go={go} eyebrow="Account recovery" title="Reset your password" copy="Enter your phone number and we will send a six-digit code if an account exists.">
+    <form className="auth-form" onSubmit={requestReset}><label>Phone number<input type="tel" inputMode="tel" placeholder="+2348012345678" autoComplete="tel" value={resetPhone} onChange={(event) => setResetPhone(event.target.value)} required /></label>{error && <p className="auth-error" role="alert">{error}</p>}<Button className="auth-submit" type="submit" disabled={submitting}>{submitting ? 'Sending…' : 'Send reset code'} <ArrowRight size={15} /></Button><p className="auth-switch"><button type="button" onClick={() => { setResetStage('login'); setError(null); }}>Back to sign in</button></p></form>
   </AuthLayout>;
-  if (resetStage === 'confirm') return <AuthLayout go={go} eyebrow="Account recovery" title="Choose a new password" copy={`Enter the code sent to ${resetEmail}. It expires after 10 minutes.`}>
-    <form className="auth-form" onSubmit={confirmReset}><label>Reset code<input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, '').slice(0, 6))} required /></label><label>New password<input type="password" autoComplete="new-password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} minLength={12} required /></label><label>Confirm new password<input type="password" autoComplete="new-password" value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} minLength={12} required /></label>{notice && <p className="development-code">{notice}</p>}{error && <p className="auth-error" role="alert">{error}</p>}<Button className="auth-submit" type="submit" disabled={submitting || resetCode.length !== 6}>{submitting ? 'Resetting…' : 'Reset password'} <ArrowRight size={15} /></Button><p className="auth-switch"><button type="button" onClick={() => { setResetStage('request'); setError(null); }}>Use a different email</button></p></form>
+  if (resetStage === 'confirm') return <AuthLayout go={go} eyebrow="Account recovery" title="Choose a new password" copy={`Enter the code sent to ${resetPhone}. It expires after 10 minutes.`}>
+    <form className="auth-form" onSubmit={confirmReset}><label>Reset code<input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, '').slice(0, 6))} required /></label><label>New password<input type="password" autoComplete="new-password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} minLength={12} required /></label><label>Confirm new password<input type="password" autoComplete="new-password" value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} minLength={12} required /></label>{notice && <p className="development-code">{notice}</p>}{error && <p className="auth-error" role="alert">{error}</p>}<Button className="auth-submit" type="submit" disabled={submitting || resetCode.length !== 6}>{submitting ? 'Resetting…' : 'Reset password'} <ArrowRight size={15} /></Button><p className="auth-switch"><button type="button" onClick={() => { setResetStage('request'); setError(null); }}>Use a different phone number</button></p></form>
   </AuthLayout>;
   return (
     <AuthLayout
       go={go}
       eyebrow="Welcome back"
       title="Sign in to SingleRent"
-      copy="Use your email and password to continue."
+      copy="Use your phone number or email and password to continue."
     >
       <form className="auth-form" onSubmit={submit}>
         <label>
-          Email address
+          Phone number or email
           <input
-            type="email"
-            placeholder="you@example.com"
-            autoComplete="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            type="text"
+            placeholder="+2348012345678 or you@example.com"
+            autoComplete="username"
+            value={identifier}
+            onChange={(event) => setIdentifier(event.target.value)}
             required
           />
         </label>
         <label>
-          Password<button type="button" className="label-action" onClick={() => { setResetEmail(email); setError(null); setNotice(null); setResetStage('request'); }}>Forgot password?</button>
+          Password<button type="button" className="label-action" onClick={() => { setResetPhone(identifier.includes('@') ? '' : identifier); setError(null); setNotice(null); setResetStage('request'); }}>Forgot password?</button>
           <div className="password-field">
             <input
               type={showPassword ? 'text' : 'password'}
@@ -249,7 +373,10 @@ export function SignIn({
         </div>
         <GoogleButton
           label="Continue with Google"
-          onClick={() => setError('Google sign-in will be available once the Google OAuth credentials are configured.')}
+          text="continue_with"
+          disabled={submitting}
+          onCredential={(idToken) => void signInWithGoogle(idToken)}
+          onError={setError}
         />
         <p className="auth-switch">
           New to SingleRent?{' '}
@@ -262,29 +389,102 @@ export function SignIn({
   );
 }
 
-export function SignUp({ go }: { go: (view: View) => void }) {
+export function SignUp({
+  go,
+  onAuthenticated,
+}: {
+  go: (view: View) => void;
+  onAuthenticated: (session: ApiSession) => void;
+}) {
   const [showPassword, setShowPassword] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [googleSignUp, setGoogleSignUp] = useState(false);
+  const [googleRole, setGoogleRole] = useState<AccountRole>('tenant');
+  const [googleDateOfBirth, setGoogleDateOfBirth] = useState('');
+  const [googlePhone, setGooglePhone] = useState('');
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (password !== confirmPassword) {
       setError('Passwords do not match.');
       return;
     }
-    registrationDraftStore.set({ firstName, lastName, email, password, confirmPassword });
+    registrationDraftStore.set({ firstName, lastName, email, phone, password, confirmPassword });
     go('account-type');
   };
+  const signUpWithGoogle = async (idToken: string) => {
+    if (googleRole === 'agent' && !googleDateOfBirth) {
+      setError('Agents must provide a date of birth and be at least 18 years old.');
+      return;
+    }
+    if (!googlePhone.trim()) {
+      setError('Enter the phone number that should receive your verification code.');
+      return;
+    }
+    setGoogleSubmitting(true);
+    setError(null);
+    try {
+      const session = await api.auth.google({
+        idToken,
+        phone: googlePhone,
+        role: googleRole.toUpperCase() as 'TENANT' | 'LANDLORD' | 'AGENT',
+        dateOfBirth: googleRole === 'agent' ? googleDateOfBirth : undefined,
+      });
+      onAuthenticated(session);
+    } catch (cause: unknown) {
+      setError(cause instanceof ApiError ? cause.message : 'Unable to continue with Google right now.');
+    } finally {
+      setGoogleSubmitting(false);
+    }
+  };
+  if (googleSignUp) {
+    return (
+      <AuthLayout
+        go={go}
+        eyebrow="Create with Google"
+        title="How will you use SingleRent?"
+        copy="Choose the type of account and confirm the phone number you want to verify before continuing securely with Google."
+      >
+        <div className="role-picker google-role-picker">
+          {(['tenant', 'landlord', 'agent'] as AccountRole[]).map((role) => {
+            const Icon = role === 'tenant' ? UserRound : role === 'landlord' ? Building2 : KeyRound;
+            return (
+              <button key={role} type="button" className={googleRole === role ? 'selected' : ''} onClick={() => setGoogleRole(role)}>
+                <i><Icon size={18} /></i>
+                <span><b>{roleCopy[role].label}</b><small>{roleCopy[role].detail}</small></span>
+                <em>{googleRole === role && <Check size={14} />}</em>
+              </button>
+            );
+          })}
+          {googleRole === 'agent' && <label className="agent-birth-date">Date of birth<input type="date" value={googleDateOfBirth} onChange={(event) => setGoogleDateOfBirth(event.target.value)} required /></label>}
+          <label className="agent-birth-date">Phone number<input type="tel" inputMode="tel" autoComplete="tel" placeholder="+2348012345678" value={googlePhone} onChange={(event) => setGooglePhone(event.target.value)} required /></label>
+          {error && <p className="auth-error" role="alert">{error}</p>}
+          <div className="google-signup-actions">
+            <Button type="button" variant="ghost" onClick={() => { setGoogleSignUp(false); setError(null); }}><ArrowLeft size={14} /> Back</Button>
+            <GoogleButton
+              label={googleSubmitting ? 'Connecting to Google…' : 'Sign up with Google'}
+              text="signup_with"
+              disabled={googleSubmitting || !googlePhone.trim() || (googleRole === 'agent' && !googleDateOfBirth)}
+              onCredential={(idToken) => void signUpWithGoogle(idToken)}
+              onError={setError}
+            />
+          </div>
+        </div>
+      </AuthLayout>
+    );
+  }
   return (
     <AuthLayout
       go={go}
       eyebrow="Create your account"
       title="Start with SingleRent"
-      copy="Set up your account, choose your role, then confirm your email address."
+      copy="Set up your account, choose your role, then confirm your phone number."
     >
       <form className="auth-form" onSubmit={submit}>
         <div className="auth-name-fields">
@@ -310,14 +510,26 @@ export function SignUp({ go }: { go: (view: View) => void }) {
           </label>
         </div>
         <label>
-          Email address
+          Phone number
+          <input
+            type="tel"
+            inputMode="tel"
+            placeholder="+2348012345678"
+            autoComplete="tel"
+            value={phone}
+            onChange={(event) => setPhone(event.target.value)}
+            required
+          />
+          <small>We will send your verification code to this number.</small>
+        </label>
+        <label>
+          Email address <small>(optional)</small>
           <input
             type="email"
             placeholder="you@example.com"
             autoComplete="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            required
           />
         </label>
         <label>
@@ -359,10 +571,7 @@ export function SignUp({ go }: { go: (view: View) => void }) {
           or
           <span />
         </div>
-        <GoogleButton
-          label="Sign up with Google"
-          onClick={() => setError('Google sign-up will be available once the Google OAuth credentials are configured.')}
-        />
+        <Button type="button" variant="outline" className="google-button" onClick={() => { setError(null); setGoogleSignUp(true); }}><i>G</i>Sign up with Google</Button>
         <p className="auth-switch">
           Already have an account?{' '}
           <button type="button" onClick={() => go('sign-in')}>
@@ -395,7 +604,7 @@ export function AccountType({
       go={go}
       eyebrow="One last choice"
       title="How will you use SingleRent?"
-      copy="We will send a verification code to your email after you create your account."
+      copy="We will send a verification code to your phone after you create your account."
     >
       <div className="role-picker">
         {choices.map(([id, Icon]) => (
@@ -416,7 +625,7 @@ export function AccountType({
         ))}
         <p>
           <ShieldCheck size={15} /> Your selected role determines your workspace
-          after your email is verified.
+          after your phone is verified.
         </p>
         {role === 'agent' && <label className="agent-birth-date">Date of birth<input type="date" value={dateOfBirth} onChange={(event) => setDateOfBirth(event.target.value)} required /></label>}
         <div className="auth-actions">
@@ -444,7 +653,7 @@ export function AccountType({
               }
             }}
           >
-            {submitting ? 'Creating account…' : 'Continue to email verification'} <ArrowRight size={14} />
+            {submitting ? 'Creating account…' : 'Continue to phone verification'} <ArrowRight size={14} />
           </Button>
         </div>
       </div>
@@ -452,7 +661,7 @@ export function AccountType({
   );
 }
 
-export function EmailVerification({
+export function PhoneVerification({
   go,
   session,
   onVerified,
@@ -461,13 +670,14 @@ export function EmailVerification({
   session: ApiSession | null;
   onVerified: (session: ApiSession) => void;
 }) {
-  const [challenge, setChallenge] = useState(session?.emailVerification ?? null);
+  const [challenge, setChallenge] = useState(session?.phoneVerification ?? null);
+  const [phone, setPhone] = useState(session?.user.phone ?? '');
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   if (!session) {
     return (
-      <AuthLayout go={go} eyebrow="Email verification" title="Sign in to verify your email" copy="Use the email and password you registered with, then we will let you enter your verification code.">
+      <AuthLayout go={go} eyebrow="Phone verification" title="Sign in to verify your phone" copy="Use the phone number or email and password you registered with, then enter your verification code.">
         <Button className="auth-submit" onClick={() => go('sign-in')}>Go to sign in <ArrowRight size={15} /></Button>
       </AuthLayout>
     );
@@ -480,14 +690,14 @@ export function EmailVerification({
     setSubmitting(true);
     setError(null);
     try {
-      await api.auth.confirmEmailVerification(session.accessToken, challenge.id, code);
+      await api.auth.confirmPhoneVerification(session.accessToken, challenge.id, code);
       // The API client may have refreshed this session before completing the request.
       // Always retain the most recently rotated token pair.
       const activeSession = sessionStore.get() ?? session;
-      const verifiedSession: ApiSession = { ...activeSession, user: { ...activeSession.user, emailVerified: true }, emailVerification: undefined };
+      const verifiedSession: ApiSession = { ...activeSession, user: { ...activeSession.user, phone, phoneVerified: true }, phoneVerification: undefined };
       onVerified(verifiedSession);
     } catch (cause: unknown) {
-      setError(cause instanceof ApiError ? cause.message : 'Unable to verify your email right now.');
+      setError(cause instanceof ApiError ? cause.message : 'Unable to verify your phone right now.');
     } finally {
       setSubmitting(false);
     }
@@ -496,7 +706,7 @@ export function EmailVerification({
     setSubmitting(true);
     setError(null);
     try {
-      setChallenge(await api.auth.resendEmailVerification(session.accessToken));
+      setChallenge(await api.auth.issuePhoneVerification(session.accessToken, phone));
       setCode('');
     } catch (cause: unknown) {
       setError(cause instanceof ApiError ? cause.message : 'Unable to issue a new verification code.');
@@ -505,8 +715,12 @@ export function EmailVerification({
     }
   };
   return (
-    <AuthLayout go={go} eyebrow="One quick check" title="Verify your email" copy={`Enter the six-digit code sent to ${session.user.email}.`}>
+    <AuthLayout go={go} eyebrow="One quick check" title="Verify your phone" copy={`Enter the six-digit code sent to ${phone || 'your phone number'}.`}>
       <div className="auth-form">
+        <label>
+          Phone number
+          <input type="tel" inputMode="tel" autoComplete="tel" placeholder="+2348012345678" value={phone} onChange={(event) => setPhone(event.target.value)} required />
+        </label>
         <label>
           Verification code
           <input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="123456" />
@@ -514,10 +728,80 @@ export function EmailVerification({
         {challenge?.developmentCode && <p className="development-code">Development code: <b>{challenge.developmentCode}</b></p>}
         {error && <p className="auth-error" role="alert">{error}</p>}
         <Button className="auth-submit" disabled={submitting || code.length !== 6} onClick={verify}>
-          {submitting ? 'Verifying…' : 'Verify email'} <ArrowRight size={15} />
+          {submitting ? 'Verifying…' : 'Verify phone'} <ArrowRight size={15} />
         </Button>
         <Button variant="ghost" disabled={submitting} onClick={resend}>Send a new code</Button>
       </div>
+    </AuthLayout>
+  );
+}
+
+export function AdminInvitationAcceptance({
+  go,
+  token,
+}: {
+  go: (view: View) => void;
+  token: string;
+}) {
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [accepted, setAccepted] = useState<{ email: string; role: 'ADMIN' | 'SUPER_ADMIN' } | null>(null);
+
+  const accept = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!token) {
+      setError('This invitation link is incomplete. Ask the person who invited you to send it again.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await api.admin.acceptInvitation({ token, firstName, lastName, password, confirmPassword });
+      setAccepted({ email: result.email, role: result.role });
+    } catch (cause: unknown) {
+      setError(cause instanceof ApiError ? cause.message : 'We could not accept this invitation. It may have expired or already been used.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (accepted) {
+    const role = accepted.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin';
+    return (
+      <AuthLayout go={go} eyebrow="Invitation accepted" title="Your administrator account is ready" copy={`Your ${role} account for ${accepted.email} has been activated. You can now sign in with the password you created.`}>
+        <div className="invitation-success" role="status">
+          <i><BadgeCheck size={25} /></i>
+          <p>Your invitation has been securely completed. Your email is already confirmed.</p>
+          <Button className="auth-submit" onClick={() => go('sign-in')}>Sign in to SingleRent <ArrowRight size={15} /></Button>
+        </div>
+      </AuthLayout>
+    );
+  }
+
+  return (
+    <AuthLayout go={go} eyebrow="Administrator invitation" title="Join the SingleRent team" copy="Create your password to activate your administrator account. This invitation can only be used once.">
+      <form className="auth-form" onSubmit={accept}>
+        <div className="auth-name-fields">
+          <label>First name<input value={firstName} onChange={(event) => setFirstName(event.target.value)} autoComplete="given-name" required /></label>
+          <label>Last name<input value={lastName} onChange={(event) => setLastName(event.target.value)} autoComplete="family-name" required /></label>
+        </div>
+        <label>Create password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength={12} required /></label>
+        <label>Confirm password<input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={12} required /></label>
+        <p className="invitation-note"><ShieldCheck size={14} /> Use a strong password with at least 12 characters. Your invitation expires after seven days.</p>
+        {error && <p className="auth-error" role="alert">{error}</p>}
+        <Button className="auth-submit" type="submit" disabled={submitting || !firstName.trim() || !lastName.trim() || password.length < 12 || confirmPassword.length < 12}>
+          {submitting ? <><LoaderCircle className="spin" size={15} /> Activating…</> : <>Activate administrator account <ArrowRight size={15} /></>}
+        </Button>
+        <p className="auth-switch"><button type="button" onClick={() => go('sign-in')}>Already have an account? Sign in</button></p>
+      </form>
     </AuthLayout>
   );
 }
@@ -543,7 +827,7 @@ export function KycFlow({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const labels = [
-    'Email verified',
+    'Phone verified',
     'Start a transaction',
     'Dojah NIN check',
     'Continue',
@@ -558,7 +842,7 @@ export function KycFlow({
           : 'Review verification';
   const copy =
     step === 1
-      ? `You can use your ${roleCopy[role].label.toLowerCase()} workspace after confirming your email. SingleRent asks for NIN only before your first rent payment or withdrawal.`
+      ? `You can use your ${roleCopy[role].label.toLowerCase()} workspace after confirming your phone number. SingleRent asks for NIN only before your first rent payment or withdrawal.`
       : step === 2
         ? `Enter the six-digit code sent to ${phone || 'your phone number'}.`
         : step === 3

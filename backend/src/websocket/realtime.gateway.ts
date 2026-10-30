@@ -1,5 +1,5 @@
-import { Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import {
   ConnectedSocket,
   OnGatewayConnection,
@@ -7,17 +7,17 @@ import {
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
-} from '@nestjs/websockets';
-import { JwtService } from '@nestjs/jwt';
-import { PermissionKey, RoleCode } from '@prisma/client';
-import { Server, Socket } from 'socket.io';
-import { JwtPayload } from '../common/types/authenticated-user';
-import { PermissionsService } from '../permissions/permissions.service';
-import { PrismaService } from '../common/database/prisma.service';
+} from "@nestjs/websockets";
+import { JwtService } from "@nestjs/jwt";
+import { PermissionKey, RoleCode } from "@prisma/client";
+import { Server, Socket } from "socket.io";
+import { JwtPayload } from "../common/types/authenticated-user";
+import { PermissionsService } from "../permissions/permissions.service";
+import { PrismaService } from "../common/database/prisma.service";
 
 interface RealtimeSocketData {
   userId: string;
-  email: string;
+  email?: string;
   roles: RoleCode[];
   permissions: PermissionKey[];
 }
@@ -25,10 +25,12 @@ interface RealtimeSocketData {
 type RealtimeSocket = Socket & { data: RealtimeSocketData };
 
 @WebSocketGateway({
-  namespace: '/realtime',
+  namespace: "/realtime",
   cors: { origin: true, credentials: true },
 })
-export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class RealtimeGateway
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server!: Server;
 
@@ -47,12 +49,13 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       this.assertAllowedOrigin(socket);
       const token = this.extractAccessToken(socket);
       const payload = await this.jwtService.verifyAsync<JwtPayload>(token, {
-        secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
+        secret: this.configService.getOrThrow<string>("JWT_ACCESS_SECRET"),
       });
-      if (payload.tokenType !== 'access') {
-        throw new Error('Invalid token type');
+      if (payload.tokenType !== "access") {
+        throw new Error("Invalid token type");
       }
-      const authorization = await this.permissionsService.getAuthorizationContext(payload.sub);
+      const authorization =
+        await this.permissionsService.getAuthorizationContext(payload.sub);
 
       socket.data = {
         userId: payload.sub,
@@ -66,11 +69,20 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         where: { userId: payload.sub },
         select: { conversationId: true },
       });
-      await socket.join(memberships.map((membership) => `conversation:${membership.conversationId}`));
-      socket.emit('presence:connected', { userId: payload.sub, at: new Date().toISOString() });
+      await socket.join(
+        memberships.map(
+          (membership) => `conversation:${membership.conversationId}`,
+        ),
+      );
+      socket.emit("presence:connected", {
+        userId: payload.sub,
+        at: new Date().toISOString(),
+      });
     } catch (error: unknown) {
-      this.logger.warn(`Rejected socket connection: ${error instanceof Error ? error.message : 'unknown error'}`);
-      socket.emit('connection:error', { message: 'Authentication failed' });
+      this.logger.warn(
+        `Rejected socket connection: ${error instanceof Error ? error.message : "unknown error"}`,
+      );
+      socket.emit("connection:error", { message: "Authentication failed" });
       socket.disconnect(true);
     }
   }
@@ -78,20 +90,20 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   handleDisconnect(client: Socket): void {
     const socket = client as RealtimeSocket;
     if (socket.data?.userId) {
-      this.server.to(`user:${socket.data.userId}`).emit('presence:offline', {
+      this.server.to(`user:${socket.data.userId}`).emit("presence:offline", {
         userId: socket.data.userId,
         at: new Date().toISOString(),
       });
     }
   }
 
-  @SubscribeMessage('presence:heartbeat')
+  @SubscribeMessage("presence:heartbeat")
   heartbeat(@ConnectedSocket() client: Socket): void {
     const socket = client as RealtimeSocket;
-    socket.emit('presence:alive', { at: new Date().toISOString() });
+    socket.emit("presence:alive", { at: new Date().toISOString() });
   }
 
-  @SubscribeMessage('conversation:typing')
+  @SubscribeMessage("conversation:typing")
   typing(
     @ConnectedSocket() client: Socket,
     payload: { conversationId?: string; isTyping?: boolean },
@@ -103,19 +115,26 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (!socket.rooms.has(`conversation:${payload.conversationId}`)) {
       return;
     }
-    socket.to(`conversation:${payload.conversationId}`).emit('conversation:typing', {
-      conversationId: payload.conversationId,
-      userId: socket.data.userId,
-      isTyping: Boolean(payload.isTyping),
-    });
+    socket
+      .to(`conversation:${payload.conversationId}`)
+      .emit("conversation:typing", {
+        conversationId: payload.conversationId,
+        userId: socket.data.userId,
+        isTyping: Boolean(payload.isTyping),
+      });
   }
 
-  emitNotification(userId: string, notification: Record<string, unknown>): void {
-    this.server.to(`user:${userId}`).emit('notification:created', notification);
+  emitNotification(
+    userId: string,
+    notification: Record<string, unknown>,
+  ): void {
+    this.server.to(`user:${userId}`).emit("notification:created", notification);
   }
 
   joinUserToConversation(userId: string, conversationId: string): void {
-    this.server.in(`user:${userId}`).socketsJoin(`conversation:${conversationId}`);
+    this.server
+      .in(`user:${userId}`)
+      .socketsJoin(`conversation:${conversationId}`);
   }
 
   joinUserToProperty(userId: string, listingId: string): void {
@@ -123,37 +142,47 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   emitMessage(conversationId: string, message: Record<string, unknown>): void {
-    this.server.to(`conversation:${conversationId}`).emit('message:created', message);
+    this.server
+      .to(`conversation:${conversationId}`)
+      .emit("message:created", message);
   }
 
-  emitMaintenanceUpdate(propertyId: string, update: Record<string, unknown>): void {
-    this.server.to(`property:${propertyId}`).emit('maintenance:updated', update);
+  emitMaintenanceUpdate(
+    propertyId: string,
+    update: Record<string, unknown>,
+  ): void {
+    this.server
+      .to(`property:${propertyId}`)
+      .emit("maintenance:updated", update);
   }
 
   emitPaymentUpdate(userId: string, update: Record<string, unknown>): void {
-    this.server.to(`user:${userId}`).emit('payment:updated', update);
+    this.server.to(`user:${userId}`).emit("payment:updated", update);
   }
 
   private extractAccessToken(socket: Socket): string {
     const handshakeToken = socket.handshake.auth.token;
-    if (typeof handshakeToken === 'string' && handshakeToken.length > 0) {
+    if (typeof handshakeToken === "string" && handshakeToken.length > 0) {
       return handshakeToken;
     }
     const authorization = socket.handshake.headers.authorization;
-    if (typeof authorization === 'string' && authorization.startsWith('Bearer ')) {
-      return authorization.slice('Bearer '.length);
+    if (
+      typeof authorization === "string" &&
+      authorization.startsWith("Bearer ")
+    ) {
+      return authorization.slice("Bearer ".length);
     }
-    throw new Error('Missing access token');
+    throw new Error("Missing access token");
   }
 
   private assertAllowedOrigin(socket: Socket): void {
     const origin = socket.handshake.headers.origin;
     const origins = this.configService
-      .getOrThrow<string>('CORS_ORIGIN')
-      .split(',')
+      .getOrThrow<string>("CORS_ORIGIN")
+      .split(",")
       .map((value) => value.trim());
     if (origin && !origins.includes(origin)) {
-      throw new Error('Origin is not allowed');
+      throw new Error("Origin is not allowed");
     }
   }
 }

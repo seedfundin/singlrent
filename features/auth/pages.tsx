@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { AccountType, EmailVerification, KycFlow, SignIn, SignUp } from "@/features/auth/auth";
+import { AccountType, AdminInvitationAcceptance, PhoneVerification, KycFlow, SignIn, SignUp } from "@/features/auth/auth";
 import { useAppNavigation, useAppSession } from "@/features/app/app-provider";
 import type { AccountRole } from "@/lib/account";
 import { api, registrationDraftStore, type ApiSession } from "@/lib/api";
@@ -20,16 +20,24 @@ export function SignInPage() {
   return <SignIn go={go} onAuthenticated={(session) => {
     setSession(session);
     const pending = sessionStorage.getItem('singlerent.notification.open');
-    if (session.user.emailVerified && pending && /^[0-9a-f-]{36}$/i.test(pending)) {
+    if (session.user.phoneVerified && pending && /^[0-9a-f-]{36}$/i.test(pending)) {
       sessionStorage.removeItem('singlerent.notification.open');
       router.push(`/notification-open?id=${encodeURIComponent(pending)}`);
-    } else go(session.user.emailVerified ? destinationFor(session) : "verify-email");
+    } else go(session.user.phoneVerified ? destinationFor(session) : "verify-phone");
   }} />;
 }
 
 export function SignUpPage() {
-  const { go } = useAppNavigation();
-  return <SignUp go={go} />;
+  const { go, router } = useAppNavigation();
+  const { setSession } = useAppSession();
+  return <SignUp go={go} onAuthenticated={(session) => {
+    setSession(session);
+    const pending = sessionStorage.getItem('singlerent.notification.open');
+    if (pending && /^[0-9a-f-]{36}$/i.test(pending)) {
+      sessionStorage.removeItem('singlerent.notification.open');
+      router.push(`/notification-open?id=${encodeURIComponent(pending)}`);
+    } else go(destinationFor(session));
+  }} />;
 }
 
 export function AccountTypePage() {
@@ -44,15 +52,25 @@ export function AccountTypePage() {
     const session = await api.auth.register({ ...draft, role: role.toUpperCase() as "TENANT" | "LANDLORD" | "AGENT" });
     registrationDraftStore.clear();
     setSession(session);
-    go("verify-email");
+    go("verify-phone");
   };
   return <AccountType go={go} onChoose={chooseRole} />;
 }
 
-export function EmailVerificationPage() {
+export function PhoneVerificationPage() {
   const { go, router } = useAppNavigation();
   const { session, setSession } = useAppSession();
-  return <EmailVerification go={go} session={session} onVerified={(nextSession) => { setSession(nextSession); const pending = sessionStorage.getItem('singlerent.notification.open'); if (pending && /^[0-9a-f-]{36}$/i.test(pending)) { sessionStorage.removeItem('singlerent.notification.open'); router.push(`/notification-open?id=${encodeURIComponent(pending)}`); } else go(destinationFor(nextSession)); }} />;
+  return <PhoneVerification go={go} session={session} onVerified={(nextSession) => { setSession(nextSession); const pending = sessionStorage.getItem('singlerent.notification.open'); if (pending && /^[0-9a-f-]{36}$/i.test(pending)) { sessionStorage.removeItem('singlerent.notification.open'); router.push(`/notification-open?id=${encodeURIComponent(pending)}`); } else go(destinationFor(nextSession)); }} />;
+}
+
+// Kept as a harmless route-level alias for existing saved links. It presents
+// the compulsory phone-verification flow; no email OTP is issued.
+export const EmailVerificationPage = PhoneVerificationPage;
+
+export function AdminInvitationAcceptancePage() {
+  const { go } = useAppNavigation();
+  const searchParams = useSearchParams();
+  return <AdminInvitationAcceptance go={go} token={searchParams.get("token") ?? ""} />;
 }
 
 export function KycPage() {

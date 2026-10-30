@@ -8,7 +8,7 @@ export const viewPaths = {
   'sign-in': '/sign-in',
   'sign-up': '/sign-up',
   'account-type': '/sign-up/account-type',
-  'verify-email': '/verify-email',
+  'verify-phone': '/verify-phone',
   kyc: '/verify-identity',
   'publisher-verification': '/verify-publisher',
   apply: '/homes/lekki-phase-1/bright-2-bedroom-apartment/apply',
