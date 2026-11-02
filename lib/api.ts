@@ -82,6 +82,7 @@ export type ApiSession = {
     lastName: string;
     roles: ApiRole[];
     phoneVerified: boolean;
+    accountVerified: boolean;
   };
   phoneVerification?: {
     id: string;

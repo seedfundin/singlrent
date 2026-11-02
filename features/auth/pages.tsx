@@ -20,10 +20,10 @@ export function SignInPage() {
   return <SignIn go={go} onAuthenticated={(session) => {
     setSession(session);
     const pending = sessionStorage.getItem('singlerent.notification.open');
-    if (session.user.phoneVerified && pending && /^[0-9a-f-]{36}$/i.test(pending)) {
+    if (session.user.accountVerified && pending && /^[0-9a-f-]{36}$/i.test(pending)) {
       sessionStorage.removeItem('singlerent.notification.open');
       router.push(`/notification-open?id=${encodeURIComponent(pending)}`);
-    } else go(session.user.phoneVerified ? destinationFor(session) : "verify-phone");
+    } else go(session.user.accountVerified ? destinationFor(session) : "verify-phone");
   }} />;
 }
 

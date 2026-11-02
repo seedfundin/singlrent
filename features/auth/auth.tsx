@@ -419,7 +419,7 @@ export function SignUp({
       return;
     }
     if (!googlePhone.trim()) {
-      setError('Enter the phone number that should receive your verification code.');
+      setError('Enter the phone number where we can reach you.');
       return;
     }
     setGoogleSubmitting(true);
@@ -444,7 +444,7 @@ export function SignUp({
         go={go}
         eyebrow="Create with Google"
         title="How will you use SingleRent?"
-        copy="Choose the type of account and confirm the phone number you want to verify before continuing securely with Google."
+        copy="Choose the type of account and add the phone number where we can reach you before continuing securely with Google."
       >
         <div className="role-picker google-role-picker">
           {(['tenant', 'landlord', 'agent'] as AccountRole[]).map((role) => {
@@ -689,7 +689,7 @@ export function PhoneVerification({
       // The API client may have refreshed this session before completing the request.
       // Always retain the most recently rotated token pair.
       const activeSession = sessionStore.get() ?? session;
-      const verifiedSession: ApiSession = { ...activeSession, user: { ...activeSession.user, phone, phoneVerified: true }, phoneVerification: undefined };
+      const verifiedSession: ApiSession = { ...activeSession, user: { ...activeSession.user, phone, phoneVerified: true, accountVerified: true }, phoneVerification: undefined };
       onVerified(verifiedSession);
     } catch (cause: unknown) {
       setError(cause instanceof ApiError ? cause.message : 'Unable to verify your phone right now.');

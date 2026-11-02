@@ -17,7 +17,7 @@ export default function NotificationOpenPage() {
       window.location.replace('/sign-in');
       return;
     }
-    if (!session.user.phoneVerified) {
+    if (!session.user.accountVerified) {
       sessionStorage.setItem('singlerent.notification.open', id);
       window.location.replace('/verify-phone');
       return;

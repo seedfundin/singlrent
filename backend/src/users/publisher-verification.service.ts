@@ -31,6 +31,7 @@ export class PublisherVerificationService {
       where: { id: userId },
       select: {
         phoneVerifiedAt: true,
+        emailVerifiedAt: true,
         userRoles: { select: { role: { select: { code: true } } } },
       },
     });
@@ -38,8 +39,8 @@ export class PublisherVerificationService {
     if (!user.userRoles.some(({ role }) => publisherRoleCodes.has(role.code))) {
       throw new ForbiddenException('Only landlord or agent accounts can complete publisher verification');
     }
-    if (!user.phoneVerifiedAt) {
-      throw new ForbiddenException('Verify your phone number before verifying your publisher account');
+    if (!user.phoneVerifiedAt && !user.emailVerifiedAt) {
+      throw new ForbiddenException('Sign in with Google or verify your phone number before verifying your publisher account');
     }
     // EasyOnboard bills completed steps even when a person abandons the flow.
     // Serialising starts per user ensures a double-click, retrying browser, or

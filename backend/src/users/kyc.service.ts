@@ -200,7 +200,7 @@ export class KycService {
       include: { kyc: true },
     });
     if (!user) throw new NotFoundException("User not found");
-    this.assertPhoneVerified(user.phoneVerifiedAt);
+    this.assertAccountVerified(user.phoneVerifiedAt, user.emailVerifiedAt);
     if (!user.email) {
       throw new BadRequestException(
         "Add a contact email address in your profile before paying the Dojah verification service fee.",
@@ -352,7 +352,7 @@ export class KycService {
       include: { kyc: true },
     });
     if (!user) throw new NotFoundException("User not found");
-    this.assertPhoneVerified(user.phoneVerifiedAt);
+    this.assertAccountVerified(user.phoneVerifiedAt, user.emailVerifiedAt);
     if (user.kyc?.status === KycStatus.VERIFIED) {
       return { verified: true, alreadyVerified: true };
     }
@@ -610,10 +610,13 @@ export class KycService {
     };
   }
 
-  private assertPhoneVerified(phoneVerifiedAt: Date | null): void {
-    if (!phoneVerifiedAt)
+  private assertAccountVerified(
+    phoneVerifiedAt: Date | null,
+    emailVerifiedAt: Date | null,
+  ): void {
+    if (!phoneVerifiedAt && !emailVerifiedAt)
       throw new ForbiddenException(
-        "Verify your phone number before starting identity verification",
+        "Sign in with Google or verify your phone number before starting identity verification",
       );
   }
 

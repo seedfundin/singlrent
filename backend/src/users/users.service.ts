@@ -112,11 +112,11 @@ export class UsersService {
     });
   }
 
-  async assertPhoneVerified(userId: string): Promise<void> {
+  async assertAccountVerified(userId: string): Promise<void> {
     const user = await this.findByIdOrThrow(userId);
-    if (!user.phoneVerifiedAt) {
+    if (!user.phoneVerifiedAt && !user.emailVerifiedAt) {
       throw new ForbiddenException(
-        "Verify your phone number before continuing",
+        "Sign in with Google or verify your phone number before continuing",
       );
     }
   }

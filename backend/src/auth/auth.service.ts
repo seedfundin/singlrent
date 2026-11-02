@@ -50,6 +50,7 @@ export interface AuthSession {
     lastName: string;
     roles: RoleCode[];
     phoneVerified: boolean;
+    accountVerified: boolean;
   };
   phoneVerification?: { id: string; expiresAt: Date; developmentCode?: string };
 }
@@ -181,7 +182,6 @@ export class AuthService {
       );
     }
     let user = await this.usersService.findByEmail(email);
-    let createdUser = false;
     if (!user) {
       const givenName =
         typeof token?.given_name === "string" ? token.given_name : "SingleRent";
@@ -223,7 +223,6 @@ export class AuthService {
         data: { emailVerifiedAt: new Date() },
       });
       user = await this.usersService.findByEmail(email);
-      createdUser = true;
     } else if (!user.emailVerifiedAt) {
       // A verified Google identity for the same address proves control of it.
       await this.prisma.user.update({
@@ -236,20 +235,10 @@ export class AuthService {
       throw new UnauthorizedException("Unable to create Google account");
     }
     await this.usersService.assertCanAuthenticate(user);
-    const session = await this.createSession(user, request);
-    if (!createdUser) return session;
-    try {
-      const phoneVerification = await this.issuePhoneChallenge(
-        user,
-        input.phone!,
-      );
-      return { ...session, phoneVerification };
-    } catch (error) {
-      await this.prisma.user
-        .delete({ where: { id: user.id } })
-        .catch(() => undefined);
-      throw error;
-    }
+    // Google has already confirmed control of the account's email address.
+    // Keep the supplied phone as a contact number, but do not send or require
+    // a second OTP just to complete Google sign-up.
+    return this.createSession(user, request);
   }
 
   async refresh(input: RefreshRequest, request: Request): Promise<AuthSession> {
@@ -529,6 +518,7 @@ export class AuthService {
       lastName: user.lastName,
       roles,
       phoneVerified: Boolean(user.phoneVerifiedAt),
+      accountVerified: Boolean(user.phoneVerifiedAt || user.emailVerifiedAt),
     };
   }
 

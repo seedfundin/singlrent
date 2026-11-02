@@ -124,7 +124,7 @@ export class PaymentsService {
         "Accept the cancellation and refund policy before payment",
       );
     }
-    await this.usersService.assertPhoneVerified(tenantId);
+    await this.usersService.assertAccountVerified(tenantId);
     try {
       await this.kycService.assertVerified(tenantId);
     } catch (error) {
