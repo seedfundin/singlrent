@@ -316,7 +316,7 @@ export function SignIn({
     <form className="auth-form" onSubmit={requestReset}><label>Phone number<input type="tel" inputMode="tel" placeholder="+2348012345678" autoComplete="tel" value={resetPhone} onChange={(event) => setResetPhone(event.target.value)} required /></label>{error && <p className="auth-error" role="alert">{error}</p>}<Button className="auth-submit" type="submit" disabled={submitting}>{submitting ? 'Sending…' : 'Send reset code'} <ArrowRight size={15} /></Button><p className="auth-switch"><button type="button" onClick={() => { setResetStage('login'); setError(null); }}>Back to sign in</button></p></form>
   </AuthLayout>;
   if (resetStage === 'confirm') return <AuthLayout go={go} eyebrow="Account recovery" title="Choose a new password" copy={`Enter the code sent to ${resetPhone}. It expires after 10 minutes.`}>
-    <form className="auth-form" onSubmit={confirmReset}><label>Reset code<input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, '').slice(0, 6))} required /></label><label>New password<input type="password" autoComplete="new-password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} minLength={12} required /></label><label>Confirm new password<input type="password" autoComplete="new-password" value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} minLength={12} required /></label>{notice && <p className="development-code">{notice}</p>}{error && <p className="auth-error" role="alert">{error}</p>}<Button className="auth-submit" type="submit" disabled={submitting || resetCode.length !== 6}>{submitting ? 'Resetting…' : 'Reset password'} <ArrowRight size={15} /></Button><p className="auth-switch"><button type="button" onClick={() => { setResetStage('request'); setError(null); }}>Use a different phone number</button></p></form>
+    <form className="auth-form" onSubmit={confirmReset}><label>Reset code<input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, '').slice(0, 6))} required /></label><label>New password<input type="password" autoComplete="new-password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} minLength={6} required /></label><label>Confirm new password<input type="password" autoComplete="new-password" value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} minLength={6} required /></label>{notice && <p className="development-code">{notice}</p>}{error && <p className="auth-error" role="alert">{error}</p>}<Button className="auth-submit" type="submit" disabled={submitting || resetCode.length !== 6}>{submitting ? 'Resetting…' : 'Reset password'} <ArrowRight size={15} /></Button><p className="auth-switch"><button type="button" onClick={() => { setResetStage('request'); setError(null); }}>Use a different phone number</button></p></form>
   </AuthLayout>;
   return (
     <AuthLayout
@@ -346,6 +346,7 @@ export function SignIn({
               autoComplete="current-password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
+              minLength={6}
               required
             />
             <button
@@ -554,6 +555,7 @@ export function SignUp({
             autoComplete="new-password"
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.target.value)}
+            minLength={6}
             required
           />
         </label>
@@ -788,11 +790,11 @@ export function AdminInvitationAcceptance({
           <label>First name<input value={firstName} onChange={(event) => setFirstName(event.target.value)} autoComplete="given-name" required /></label>
           <label>Last name<input value={lastName} onChange={(event) => setLastName(event.target.value)} autoComplete="family-name" required /></label>
         </div>
-        <label>Create password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength={12} required /></label>
-        <label>Confirm password<input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={12} required /></label>
-        <p className="invitation-note"><ShieldCheck size={14} /> Use a strong password with at least 12 characters. Your invitation expires after seven days.</p>
+          <label>Create password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength={6} required /></label>
+          <label>Confirm password<input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={6} required /></label>
+          <p className="invitation-note"><ShieldCheck size={14} /> Use a strong password with at least 6 characters. Your invitation expires after seven days.</p>
         {error && <p className="auth-error" role="alert">{error}</p>}
-        <Button className="auth-submit" type="submit" disabled={submitting || !firstName.trim() || !lastName.trim() || password.length < 12 || confirmPassword.length < 12}>
+          <Button className="auth-submit" type="submit" disabled={submitting || !firstName.trim() || !lastName.trim() || password.length < 6 || confirmPassword.length < 6}>
           {submitting ? <><LoaderCircle className="spin" size={15} /> Activating…</> : <>Activate administrator account <ArrowRight size={15} /></>}
         </Button>
         <p className="auth-switch"><button type="button" onClick={() => go('sign-in')}>Already have an account? Sign in</button></p>

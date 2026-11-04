@@ -2,7 +2,7 @@ import { ListingStatus, MaintenancePriority, MaintenanceStatus, PaymentStatus, P
 import { z } from 'zod';
 import { paginationQuerySchema } from '../../common/http/pagination';
 
-const passwordSchema = z.string().min(12).max(128);
+const passwordSchema = z.string().min(6).max(128);
 
 export const adminUserQuerySchema = paginationQuerySchema.extend({
   role: z.nativeEnum(RoleCode).optional(),

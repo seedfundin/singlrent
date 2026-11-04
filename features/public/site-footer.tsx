@@ -64,8 +64,7 @@ export function SiteFooter({ go }: SiteFooterProps) {
       </div>
 
       <div className="site-footer-bottom">
-        <span>© {new Date().getFullYear()} SingleRent. All rights reserved.</span>
-        <span>Built for better moves across Nigeria.</span>
+        <span>© {new Date().getFullYear()} SingleRent Limited.</span>
       </div>
     </footer>
   );
