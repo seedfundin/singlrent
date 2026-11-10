@@ -42,6 +42,9 @@ export const updateListingSchema = listingPayload.partial().refine(
   { message: 'Provide at least one listing field to update' },
 );
 export const listingQuerySchema = paginationQuerySchema.extend({
+  // A conversational discovery phrase is ranked rather than treated as a
+  // database-only filter, so people still see the closest available homes.
+  search: z.string().trim().max(500).optional(),
   state: z.string().trim().max(100).optional(),
   area: z.string().trim().max(150).optional(),
   propertyType: z.nativeEnum(PropertyType).optional(),

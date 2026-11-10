@@ -7,6 +7,7 @@ import { PrismaService } from '../common/database/prisma.service';
 import { MediaService } from '../media/media.service';
 import { PricingService } from '../financials/pricing.service';
 import { PublisherVerificationService } from '../users/publisher-verification.service';
+import { buildListingDiscoveryIntent, hasDiscoveryCriteria, scoreListingForDiscovery } from './listing-discovery';
 import { CreateListingRequest, ListingQuery, UpdateListingRequest } from './dto/listing.schemas';
 
 const listingInclude = {
@@ -19,6 +20,13 @@ const listingInclude = {
 type ListingWithRelations = Prisma.ListingGetPayload<{ include: typeof listingInclude }>;
 type ListingReputation = { score: number; propertyReviewCount: number; landlordReviewCount: number; label: 'NEW' | 'ESTABLISHED' };
 type ListingWithReputation = ListingWithRelations & { reputation: ListingReputation };
+type ListingSearchResult = Paginated<ListingWithRelations | ListingWithReputation> & {
+  search?: {
+    mode: 'EXACT' | 'SIMILAR';
+    criteria: string[];
+    exactMatchCount: number;
+  };
+};
 
 @Injectable()
 export class ListingsService {
@@ -30,7 +38,10 @@ export class ListingsService {
     private readonly pricingService: PricingService,
   ) {}
 
-  async search(query: ListingQuery): Promise<Paginated<ListingWithRelations | ListingWithReputation>> {
+  async search(query: ListingQuery): Promise<ListingSearchResult> {
+    if (hasDiscoveryCriteria(query)) {
+      return this.searchByBestFit(query);
+    }
     const where: Prisma.ListingWhereInput = {
       status: ListingStatus.PUBLISHED,
       availability: query.availability ?? ListingAvailability.AVAILABLE,
@@ -72,6 +83,52 @@ export class ListingsService {
       this.prisma.listing.count({ where }),
     ]);
     return pageResult(items, total, query);
+  }
+
+  /**
+   * Discovery deliberately starts with every currently available home and
+   * scores each one in memory. This means an overly-specific search is useful
+   * instead of ending at a blank screen: exact matches appear first, followed
+   * by the nearest viable alternatives.
+   */
+  private async searchByBestFit(query: ListingQuery): Promise<ListingSearchResult> {
+    const where: Prisma.ListingWhereInput = {
+      status: ListingStatus.PUBLISHED,
+      availability: query.availability ?? ListingAvailability.AVAILABLE,
+      annualRentKobo:
+        query.minRentKobo || query.maxRentKobo
+          ? {
+              gte: query.minRentKobo ? parseKobo(query.minRentKobo, 'minRentKobo') : undefined,
+              lte: query.maxRentKobo ? parseKobo(query.maxRentKobo, 'maxRentKobo') : undefined,
+            }
+          : undefined,
+    };
+    const candidates = await this.prisma.listing.findMany({
+      where,
+      include: listingInclude,
+      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+      // A bounded candidate set protects response time while being far beyond
+      // the number of homes a person can practically compare in one search.
+      take: 500,
+    });
+    const intent = buildListingDiscoveryIntent(query);
+    const ranked = candidates
+      .map((listing) => ({ listing, discovery: scoreListingForDiscovery(listing, intent) }))
+      .sort((left, right) =>
+        Number(right.discovery.exact) - Number(left.discovery.exact) ||
+        right.discovery.score - left.discovery.score ||
+        Number(right.listing.publishedAt) - Number(left.listing.publishedAt),
+      );
+    const exactMatchCount = ranked.filter((item) => item.discovery.exact).length;
+    const offset = (query.page - 1) * query.pageSize;
+    return {
+      ...pageResult(ranked.slice(offset, offset + query.pageSize).map((item) => item.listing), ranked.length, query),
+      search: {
+        mode: exactMatchCount ? 'EXACT' : 'SIMILAR',
+        criteria: intent.criteria,
+        exactMatchCount,
+      },
+    };
   }
 
   private async withReputation(items: ListingWithRelations[]): Promise<ListingWithReputation[]> {

@@ -640,6 +640,14 @@ export type PaginatedResponse<T> = {
   meta: { page: number; pageSize: number; total: number; totalPages: number };
 };
 
+export type ListingSearchResponse = PaginatedResponse<ApiListing> & {
+  search?: {
+    mode: 'EXACT' | 'SIMILAR';
+    criteria: string[];
+    exactMatchCount: number;
+  };
+};
+
 export type ApiAdminUser = {
   id: string;
   email: string;
@@ -695,6 +703,7 @@ export type AdminListingQuery = {
 export type ListingQuery = {
   page?: number;
   pageSize?: number;
+  search?: string;
   state?: string;
   area?: string;
   bedrooms?: number;
@@ -1498,8 +1507,8 @@ export const api = {
     },
   },
   listings: {
-    search(query?: ListingQuery): Promise<PaginatedResponse<ApiListing>> {
-      return request<PaginatedResponse<ApiListing>>(
+    search(query?: ListingQuery): Promise<ListingSearchResponse> {
+      return request<ListingSearchResponse>(
         `/listings${queryString(query)}`,
       );
     },

@@ -12,6 +12,7 @@ export const listingAmenityGroups = [
       "Treated water",
       "Water heater",
       "Water storage tank",
+      "Private bathroom",
     ],
   },
   {
@@ -23,6 +24,7 @@ export const listingAmenityGroups = [
       "Secure parking",
       "Visitor parking",
       "Paved access road",
+      "Private entrance",
     ],
   },
   {
@@ -33,6 +35,7 @@ export const listingAmenityGroups = [
       "Furnished",
       "Balcony or private outdoor space",
       "Fitted kitchen",
+      "Private kitchen",
       "Laundry area",
     ],
   },

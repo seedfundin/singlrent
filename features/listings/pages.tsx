@@ -33,7 +33,7 @@ import { Button } from '@/components/ui/button';
 import { useAppSession } from '@/features/app/app-provider';
 import { InspectionRequest } from '@/features/inspections/inspections';
 import { ListingReviews } from '@/features/reviews/listing-reviews';
-import { api, type ApiListing } from '@/lib/api';
+import { api, type ApiListing, type ListingSearchResponse } from '@/lib/api';
 import { formatNaira } from '@/lib/pricing';
 import {
   Back,
@@ -55,6 +55,7 @@ import {
 } from '@/features/maps/google-property-map';
 import '@/features/maps/google-listings-map.css';
 import '@/features/listings/listing-details.css';
+import '@/features/listings/assisted-search.css';
 
 const GoogleStreetView = dynamic(
   () => import('@/features/maps/google-street-view'),
@@ -293,12 +294,13 @@ export function ExploreHomes({ go }: { go: Navigate }) {
   // The map is opt-in. Listing cards load first and no Google map request is
   // made until the visitor explicitly selects Map.
   const [map, setMap] = useState(false);
-  const [areaInput, setAreaInput] = useState('');
-  const [area, setArea] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
   const [bedrooms, setBedrooms] = useState('');
   const [sort, setSort] = useState<'RECENT' | 'RECOMMENDED'>('RECENT');
   const [listings, setListings] = useState<ApiListing[]>([]);
   const [total, setTotal] = useState(0);
+  const [searchSummary, setSearchSummary] = useState<ListingSearchResponse['search']>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -308,7 +310,7 @@ export function ExploreHomes({ go }: { go: Navigate }) {
     api.listings
       .search({
         pageSize: 12,
-        area: area || undefined,
+        search: searchTerm || undefined,
         bedrooms: bedrooms ? Number(bedrooms) : undefined,
         sort,
       })
@@ -316,6 +318,7 @@ export function ExploreHomes({ go }: { go: Navigate }) {
         if (active) {
           setListings(response.items);
           setTotal(response.meta.total);
+          setSearchSummary(response.search);
         }
       })
       .catch(
@@ -329,10 +332,20 @@ export function ExploreHomes({ go }: { go: Navigate }) {
     return () => {
       active = false;
     };
-  }, [area, bedrooms, sort]);
+  }, [searchTerm, bedrooms, sort]);
   const search = (event: FormEvent) => {
     event.preventDefault();
-    setArea(areaInput.trim());
+    setSearchTerm(searchInput.trim());
+  };
+  const hasSearch = Boolean(searchTerm || bedrooms);
+  const applySuggestion = (suggestion: string) => {
+    setSearchInput(suggestion);
+    setSearchTerm(suggestion);
+  };
+  const clearSearch = () => {
+    setSearchInput('');
+    setSearchTerm('');
+    setBedrooms('');
   };
   return (
     <>
@@ -352,14 +365,14 @@ export function ExploreHomes({ go }: { go: Navigate }) {
             <ArrowLeft size={14} /> Back home
           </Button>
         </div>
-        <form className="filters" onSubmit={search}>
-          <label className="listing-filter-field">
-            <MapPin size={15} />
+        <form className="filters assisted-search" onSubmit={search}>
+          <label className="listing-filter-field assisted-search-field">
+            <Sparkles size={16} />
             <input
-              value={areaInput}
-              onChange={(event) => setAreaInput(event.target.value)}
-              placeholder="Search city or area"
-              aria-label="Search by city or area"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              placeholder="Try: 2-bedroom flat in Surulere with a prepaid meter and Band A power"
+              aria-label="Describe the home you want"
             />
           </label>
           <label className="listing-filter-field">
@@ -380,18 +393,24 @@ export function ExploreHomes({ go }: { go: Navigate }) {
             </select>
           </label>
           <Button type="submit" size="sm">
-            <Search size={14} /> Search
+            <Search size={14} /> Find homes
           </Button>
-          <label className="listing-filter-field">
-            <select
-              value={sort}
-              onChange={(event) => setSort(event.target.value as typeof sort)}
-              aria-label="Listing order"
-            >
-              <option value="RECENT">Newest listings</option>
-              <option value="RECOMMENDED">Recommended</option>
-            </select>
-          </label>
+          {hasSearch ? (
+            <button type="button" className="clear-discovery-search" onClick={clearSearch}>
+              <X size={14} /> Clear
+            </button>
+          ) : (
+            <label className="listing-filter-field">
+              <select
+                value={sort}
+                onChange={(event) => setSort(event.target.value as typeof sort)}
+                aria-label="Listing order"
+              >
+                <option value="RECENT">Newest listings</option>
+                <option value="RECOMMENDED">Recommended</option>
+              </select>
+            </label>
+          )}
           <span>
             <button
               type="button"
@@ -409,16 +428,41 @@ export function ExploreHomes({ go }: { go: Navigate }) {
             </button>
           </span>
         </form>
+        <div className="assisted-search-suggestions" aria-label="Search examples">
+          <span>Popular searches</span>
+          {[
+            '2-bedroom with prepaid meter and Band A electricity',
+            'Private bathroom with borehole water',
+            'Furnished studio with fibre internet',
+          ].map((suggestion) => (
+            <button key={suggestion} type="button" onClick={() => applySuggestion(suggestion)}>
+              {suggestion}
+            </button>
+          ))}
+        </div>
         <div className="search-layout">
           <section>
             <p className="sort">
               <b>
-                {sort === 'RECOMMENDED'
+                {hasSearch
+                  ? searchSummary?.mode === 'SIMILAR'
+                    ? 'Closest available homes'
+                    : 'Best matches for you'
+                  : sort === 'RECOMMENDED'
                   ? 'Recommended listings'
                   : 'Available listings'}
               </b>
-              {area && <i>{area} ×</i>}
-              {sort === 'RECOMMENDED' && (
+              {searchSummary?.mode === 'EXACT' && hasSearch && (
+                <small>
+                  {searchSummary.exactMatchCount} exact {searchSummary.exactMatchCount === 1 ? 'match' : 'matches'} first, then similar homes.
+                </small>
+              )}
+              {searchSummary?.mode === 'SIMILAR' && hasSearch && (
+                <small>
+                  No home has every detail yet, so these are ranked by what matters most to you.
+                </small>
+              )}
+              {!hasSearch && sort === 'RECOMMENDED' && (
                 <small>
                   Recommendations use verified reviews as a limited secondary
                   signal. New properties remain neutral.
@@ -434,14 +478,25 @@ export function ExploreHomes({ go }: { go: Navigate }) {
                 <CircleAlert size={17} /> {error}
               </div>
             ) : listings.length ? (
-              <div className="results">
-                {listings.map((listing) => (
-                  <ListingCard key={listing.id} go={go} listing={listing} />
-                ))}
-              </div>
+              <>
+                {hasSearch && searchSummary?.criteria.length ? (
+                  <div className={`best-fit-note ${searchSummary.mode === 'SIMILAR' ? 'similar' : ''}`}>
+                    <Sparkles size={16} />
+                    <span>
+                      <b>{searchSummary.mode === 'SIMILAR' ? 'Closest homes, not a dead end' : 'Your search is working for you'}</b>
+                      <small>Matching: {searchSummary.criteria.join(' · ')}</small>
+                    </span>
+                  </div>
+                ) : null}
+                <div className="results">
+                  {listings.map((listing) => (
+                    <ListingCard key={listing.id} go={go} listing={listing} />
+                  ))}
+                </div>
+              </>
             ) : (
               <div className="listing-state">
-                <House size={17} /> No homes match this search yet.
+                <House size={17} /> There are no available homes to compare yet. Please check again soon.
               </div>
             )}
           </section>

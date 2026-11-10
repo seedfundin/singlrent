@@ -1,0 +1,152 @@
+.assisted-search {
+  align-items: center;
+  gap: 9px;
+}
+
+.assisted-search-field {
+  min-width: min(490px, 100%);
+  flex: 1 1 420px;
+  border-color: #b9d8c2;
+  background: #fbfefb;
+}
+
+.assisted-search-field svg {
+  color: #277752;
+}
+
+.assisted-search-field input {
+  min-width: 0;
+  width: 100%;
+}
+
+.clear-discovery-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 33px;
+  flex: 0 0 auto;
+  padding: 0 9px;
+  border: 1px solid #dce5dc;
+  border-radius: 7px;
+  color: #52665c;
+  background: #fff;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.assisted-search-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  padding: 12px 0 0;
+}
+
+.assisted-search-suggestions > span {
+  margin-right: 2px;
+  color: #829088;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.assisted-search-suggestions button {
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid #d6e5d8;
+  border-radius: 999px;
+  padding: 6px 9px;
+  color: #426254;
+  background: #f7fbf7;
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assisted-search-suggestions button:hover,
+.assisted-search-suggestions button:focus-visible,
+.clear-discovery-search:hover,
+.clear-discovery-search:focus-visible {
+  border-color: #66a87f;
+  color: #194f38;
+  outline: none;
+}
+
+.best-fit-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 12px 0 14px;
+  padding: 11px 12px;
+  border: 1px solid #bde0c6;
+  border-radius: 9px;
+  color: #236847;
+  background: #eef9f1;
+}
+
+.best-fit-note.similar {
+  border-color: #ecd9a7;
+  color: #775711;
+  background: #fff9e8;
+}
+
+.best-fit-note > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.best-fit-note span {
+  display: grid;
+  gap: 3px;
+}
+
+.best-fit-note b {
+  font-size: 11px;
+}
+
+.best-fit-note small {
+  color: inherit;
+  font-size: 10px;
+  line-height: 1.45;
+  opacity: .83;
+}
+
+.sort > small {
+  margin-left: 7px;
+  color: #71827a;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+@media (max-width: 600px) {
+  .assisted-search {
+    gap: 7px;
+  }
+
+  .assisted-search-field {
+    min-width: 285px;
+    flex-basis: 285px;
+  }
+
+  .assisted-search-suggestions {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    margin-inline: -16px;
+    padding: 12px 16px 0;
+  }
+
+  .assisted-search-suggestions > span,
+  .assisted-search-suggestions button {
+    flex: 0 0 auto;
+  }
+
+  .sort {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .sort > small {
+    margin-left: 0;
+  }
+}
