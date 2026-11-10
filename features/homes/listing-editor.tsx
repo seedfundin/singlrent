@@ -2,13 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRight, Check, CircleAlert, CircleCheck, MapPin } from "lucide-react";
+import { ArrowLeft, ArrowRight, CircleAlert, CircleCheck, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Shell, Status } from "@/features/app/shell";
 import { useAppSession } from "@/features/app/app-provider";
 import { InspectionSettings } from "@/features/inspections/inspections";
 import { GoogleAddressAutocomplete } from "@/features/maps/google-address-autocomplete";
 import { GooglePropertyMap, type PropertyCoordinates } from "@/features/maps/google-property-map";
+import { AmenityChecklist } from "@/features/listings/amenity-checklist";
+import { MINIMUM_LISTING_AMENITIES } from "@/features/listings/listing-amenities";
 import { ApiFieldError } from "@/features/forms/api-field-error";
 import { api, apiFieldErrors, apiFormError, type ApiFieldErrors, type ApiListing } from "@/lib/api";
 import type { View } from "@/lib/routes";
@@ -33,7 +35,6 @@ type ListingForm = {
   minimumLeaseMonths: number;
 };
 
-const amenityOptions = ["24/7 power backup", "Treated water", "Parking", "CCTV", "Gym", "Pet friendly"];
 const propertyTypes: ApiListing["propertyType"][] = ["APARTMENT", "HOUSE", "DUPLEX", "STUDIO", "ROOM", "OTHER"];
 const listingFieldAliases = {
   annualRentKobo: "annualRent",
@@ -91,6 +92,7 @@ function localListingErrors(form: ListingForm, coordinates: PropertyCoordinates 
   if (form.area.trim().length < 2) add("area", "Area must contain at least 2 characters.");
   if (form.address.trim().length < 5) add("address", "Choose an address with at least 5 characters.");
   if (!coordinates) add("location", "Choose an address and pin the exact building location.");
+  if (form.amenities.length < MINIMUM_LISTING_AMENITIES) add("amenities", `Select at least ${MINIMUM_LISTING_AMENITIES} genuine property features before publishing.`);
   if (!Number.isInteger(form.minimumLeaseMonths) || form.minimumLeaseMonths < 1 || form.minimumLeaseMonths > 36) add("minimumLeaseMonths", "Minimum lease must be between 1 and 36 months.");
   return errors;
 }
@@ -150,6 +152,11 @@ export function ListingEditor({ go, manager }: { go: Go; manager: Manager }) {
         ? current.amenities.filter((item) => item !== amenity)
         : [...current.amenities, amenity],
     } : current);
+    setFieldErrors((current) => {
+      const { amenities: _cleared, ...remaining } = current;
+      return remaining;
+    });
+    setError(null);
   };
 
   const save = async () => {
@@ -208,7 +215,12 @@ export function ListingEditor({ go, manager }: { go: Go; manager: Manager }) {
     <section className="panel listing-editor-form">
       <div className="editor-section"><span><small>Basics</small><h2>Property details</h2></span><div className="formgrid"><label>Property type<select value={form.propertyType} onChange={(event) => update("propertyType", event.target.value as ListingForm["propertyType"])}>{propertyTypes.map((type) => <option key={type} value={type}>{type[0]}{type.slice(1).toLowerCase()}</option>)}</select></label><label>Property title<input aria-invalid={Boolean(fieldErrors.title)} value={form.title} onChange={(event) => update("title", event.target.value)} /><ApiFieldError errors={fieldErrors} field="title" /></label><label>Annual rent (₦)<input aria-invalid={Boolean(fieldErrors.annualRent)} inputMode="numeric" value={form.annualRent} onChange={(event) => update("annualRent", event.target.value)} /><ApiFieldError errors={fieldErrors} field="annualRent" /></label><label>Service charge (₦)<input aria-invalid={Boolean(fieldErrors.serviceCharge)} inputMode="numeric" value={form.serviceCharge} onChange={(event) => update("serviceCharge", event.target.value)} /><ApiFieldError errors={fieldErrors} field="serviceCharge" /></label><label>Caution fee (₦)<input aria-invalid={Boolean(fieldErrors.cautionFee)} inputMode="numeric" value={form.cautionFee} onChange={(event) => update("cautionFee", event.target.value)} /><ApiFieldError errors={fieldErrors} field="cautionFee" /></label></div></div>
       <div className="editor-section location-step"><span><small>Location</small><h2>Set the final map pin</h2><p>Search for an address, then drag the marker or click the map to pinpoint the building. This exact pin is saved with the listing.</p></span><div className="formgrid"><label>State<input aria-invalid={Boolean(fieldErrors.state)} value={form.state} onChange={(event) => update("state", event.target.value)} /><ApiFieldError errors={fieldErrors} field="state" /></label><label>Area<input aria-invalid={Boolean(fieldErrors.area)} value={form.area} onChange={(event) => update("area", event.target.value)} /><ApiFieldError errors={fieldErrors} field="area" /></label><label className="full">Search property address<GoogleAddressAutocomplete initialValue={form.address} onPlaceSelected={({ address, coordinates: nextCoordinates }) => { update("address", address); setCoordinates(nextCoordinates); setFieldErrors((current) => { const { location: _location, ...remaining } = current; return remaining; }); }} /><ApiFieldError errors={fieldErrors} field="address" /></label><div className="full map-picker"><GooglePropertyMap value={coordinates} onChange={(nextCoordinates) => { setCoordinates(nextCoordinates); setFieldErrors((current) => { const { location: _location, ...remaining } = current; return remaining; }); }} interactive /><ApiFieldError errors={fieldErrors} field="location" /><p><MapPin size={15} /><span><b>Final pin: {coordinates ? "ready" : "required"}</b><small>Only the final marker position is saved. The public map never geocodes the address again.</small></span></p>{coordinates && <code className="coordinate-debug">lat {coordinates.latitude.toFixed(6)} · lng {coordinates.longitude.toFixed(6)}</code>}</div></div></div>
-      <div className="editor-section"><span><small>Home details</small><h2>Describe the home</h2></span><div className="details"><span>Bedrooms<b><button type="button" onClick={() => update("bedrooms", Math.max(0, form.bedrooms - 1))}>−</button>{form.bedrooms}<button type="button" onClick={() => update("bedrooms", form.bedrooms + 1)}>+</button></b></span><span>Bathrooms<b><button type="button" onClick={() => update("bathrooms", Math.max(0, form.bathrooms - 1))}>−</button>{form.bathrooms}<button type="button" onClick={() => update("bathrooms", form.bathrooms + 1)}>+</button></b></span><label>Description<textarea aria-invalid={Boolean(fieldErrors.description)} value={form.description} onChange={(event) => update("description", event.target.value)} /><ApiFieldError errors={fieldErrors} field="description" /></label><div>{amenityOptions.map((amenity) => <button type="button" className={form.amenities.includes(amenity) ? "selected" : ""} onClick={() => toggleAmenity(amenity)} key={amenity}><Check size={12} />{amenity}</button>)}</div></div></div>
+      <div className="editor-section"><span><small>Home details</small><h2>Describe the home</h2></span><div className="details">
+        <span>Bedrooms<b><button type="button" onClick={() => update("bedrooms", Math.max(0, form.bedrooms - 1))}>−</button>{form.bedrooms}<button type="button" onClick={() => update("bedrooms", form.bedrooms + 1)}>+</button></b></span>
+        <span>Bathrooms<b><button type="button" onClick={() => update("bathrooms", Math.max(0, form.bathrooms - 1))}>−</button>{form.bathrooms}<button type="button" onClick={() => update("bathrooms", form.bathrooms + 1)}>+</button></b></span>
+        <label>Description<textarea aria-invalid={Boolean(fieldErrors.description)} value={form.description} onChange={(event) => update("description", event.target.value)} /><ApiFieldError errors={fieldErrors} field="description" /></label>
+        <AmenityChecklist selected={form.amenities} onToggle={toggleAmenity} error={fieldErrors.amenities?.[0]} />
+      </div></div>
       <div className="editor-section"><span><small>Availability</small><h2>Rental terms</h2></span><div className="rules"><label>Available from<input type="date" value={form.availableFrom} onChange={(event) => update("availableFrom", event.target.value)} /></label><label>Minimum lease (months)<input aria-invalid={Boolean(fieldErrors.minimumLeaseMonths)} type="number" min="1" max="36" value={form.minimumLeaseMonths} onChange={(event) => update("minimumLeaseMonths", Math.max(1, Math.min(36, Number(event.target.value) || 1)))} /><ApiFieldError errors={fieldErrors} field="minimumLeaseMonths" /></label></div><p className="editor-media-note"><CircleCheck size={14} /> {listing.media.length} existing media file{listing.media.length === 1 ? "" : "s"} will remain attached to this listing.</p></div>
       <div className="actions"><Button variant="ghost" disabled={saving} onClick={() => go(views.home, { listing: listing.id })}>Cancel</Button><Button disabled={saving} onClick={() => void save()}>{saving ? "Publishing changes…" : "Save and publish changes"} <ArrowRight size={14} /></Button></div>
     </section>

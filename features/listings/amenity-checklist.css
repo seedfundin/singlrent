@@ -1,0 +1,24 @@
+.amenity-checklist { grid-column: 1 / -1; margin-top: 2px; padding: 15px; border: 1px solid #d8e7db; border-radius: 10px; background: #fbfefb; }
+.amenity-checklist > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.amenity-checklist header > span { display: grid; gap: 3px; }
+.amenity-checklist header small { color: #73857a; font-size: 8px; font-weight: bold; letter-spacing: .09em; text-transform: uppercase; }
+.amenity-checklist h3 { margin: 0; color: #244438; font-size: 14px; }
+.amenity-checklist header p { margin: 0; color: #6b7e74; font-size: 10px; line-height: 1.45; }
+.amenity-checklist header > strong { display: grid; min-width: 92px; gap: 2px; padding: 7px 9px; border-radius: 7px; color: #936a20; background: #fff7e6; font-size: 11px; text-align: center; }
+.amenity-checklist header > strong.complete { color: #23734f; background: #e7f5eb; }
+.amenity-checklist header > strong small { color: inherit; font-size: 8px; letter-spacing: 0; text-transform: none; }
+.amenity-checklist-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.amenity-checklist fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.amenity-checklist legend { margin-bottom: 6px; color: #5c7066; font-size: 9px; font-weight: bold; }
+.amenity-checklist fieldset > div { display: flex; gap: 6px; flex-wrap: wrap; }
+.amenity-checklist button { display: inline-flex; align-items: center; gap: 5px; min-height: 29px; border: 1px solid #d8e3da; border-radius: 6px; color: #60746a; background: #fff; padding: 5px 7px; font-size: 9px; line-height: 1.2; text-align: left; }
+.amenity-checklist button i { display: grid; place-items: center; width: 15px; height: 15px; border: 1px solid #c8d7cc; border-radius: 50%; color: transparent; font-style: normal; }
+.amenity-checklist button.selected { border-color: #79b592; color: #1f704c; background: #eff8f1; }
+.amenity-checklist button.selected i { border-color: #2d8b5e; color: #fff; background: #2d8b5e; }
+.amenity-checklist-error { display: flex; align-items: center; gap: 5px; margin: 12px 0 0 !important; color: #a44335 !important; font-size: 9px !important; }
+
+@media (max-width: 520px) {
+  .amenity-checklist > header { display: grid; }
+  .amenity-checklist header > strong { justify-self: start; }
+  .amenity-checklist-groups { grid-template-columns: 1fr; }
+}

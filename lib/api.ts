@@ -716,7 +716,7 @@ export type CreateListingInput = {
   address: string;
   latitude: number;
   longitude: number;
-  amenities?: string[];
+  amenities: string[];
   availableFrom?: string;
   minimumLeaseMonths?: number;
   media?: ListingMediaInput[];

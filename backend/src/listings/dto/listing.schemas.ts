@@ -24,7 +24,10 @@ const listingPayload = z.object({
   address: z.string().trim().min(5).max(500),
   latitude: z.number().finite().min(-90).max(90).optional(),
   longitude: z.number().finite().min(-180).max(180).optional(),
-  amenities: z.array(z.string().trim().min(1).max(100)).max(60).default([]),
+  amenities: z.array(z.string().trim().min(1).max(100))
+    .min(10, 'Select at least 10 property features')
+    .max(60)
+    .refine((amenities) => new Set(amenities).size === amenities.length, 'Choose each property feature only once'),
   rules: z.record(z.union([z.string().max(250), z.boolean(), z.number().int()])).optional(),
   availableFrom: z.string().datetime().optional(),
   minimumLeaseMonths: z.number().int().min(1).max(36).default(12),
